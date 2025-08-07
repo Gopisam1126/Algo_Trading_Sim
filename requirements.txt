@@ -1,0 +1,5 @@
+pandas>=2.2.0
+numpy>=1.26.0
+websockets>=12.0
+flask>=3.0.0
+flask-cors>=4.0.0
