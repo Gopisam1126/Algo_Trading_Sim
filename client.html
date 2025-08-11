@@ -700,9 +700,18 @@
                     </div>
                 </div>
 
+                <!-- Momentum -->
                 <div class="indicator-section">
                     <h4>Momentum</h4>
                     <div id="momentumData">
+                        <div>Calculating...</div>
+                    </div>
+                </div>
+
+                <!-- ATR -->
+                 <div class="indicator-section">
+                    <h4>ATR (Average True Range)</h4>
+                    <div id="atrData">
                         <div>Calculating...</div>
                     </div>
                 </div>
@@ -759,6 +768,7 @@
             roc_period: 14,
             momentum_period: 10,
             momentum_threshold_multiplier: 0.02,
+            atr_period: 14,
         };
 
         // Technical indicators data storage
@@ -774,6 +784,7 @@
             cci: {},
             roc: {},
             momentum: {},
+            atr: {}
         };
 
         function updateIndicatorsConfig() {
@@ -804,6 +815,7 @@
                     roc_period: parseInt(document.getElementById('rocPeriod').value) || 14,
                     momentum_period: parseInt(document.getElementById('momentumPeriod').value) || 10,
                     momentum_threshold_multiplier: parseFloat(document.getElementById('momentumThreshold').value) || 0.02,
+                    atr_period: parseInt(document.getElementById('atrPeriod')?.value) || 14,
                 };
                 
                 addLog('📊 Technical indicators configuration updated', 'info');
@@ -855,6 +867,7 @@
                 document.getElementById('rocPeriod').value = '14';
                 document.getElementById('momentumPeriod').value = '10';
                 document.getElementById('momentumThreshold').value = '0.02';
+                document.getElementById('atrPeriod').value = '14';
                 
                 addLog('🔄 Configuration reset to defaults', 'info');
             } catch (error) {
@@ -910,7 +923,7 @@
         }
 
         function showIndicatorsUnavailable() {
-            const sections = ['movingAveragesData', 'macdData', 'rsiData', 'adxData', 'psarData', 'ichimokuData', 'supertrendData', 'stochasticData', 'cciData', 'momentumData'];
+            const sections = ['movingAveragesData', 'macdData', 'rsiData', 'adxData', 'psarData', 'ichimokuData', 'supertrendData', 'stochasticData', 'cciData', 'momentumData', 'atrData'];
             sections.forEach(sectionId => {
                 const element = document.getElementById(sectionId);
                 if (element) {
@@ -1109,6 +1122,47 @@
                         momentumElement.innerHTML = `
                             <div><strong>Value:</strong> ${value.toFixed(4)}</div>
                             <div><strong>Signal:</strong> <span style="color: ${signalColor}; font-weight: bold;">${signal}</span></div>
+                        `;
+                    }
+                }
+
+                // ATR
+                if (indicators.atr) {
+                    const atr = indicators.atr;
+                    const atrElement = document.getElementById('atrData');
+                    if (atrElement) {
+                        const value = atr.value || 0;
+                        const signal = atr.signal || 'N/A';
+                    
+                        // Parse complex ATR signals for better display
+                        let signalDisplay = signal;
+                        let signalColor = '#333';
+
+                        if (signal.includes('HIGH_VOLATILITY')) {
+                            signalColor = '#e67e22';
+                        } else if (signal.includes('LOW_VOLATILITY')) {
+                            signalColor = '#3498db';
+                        } else if (signal.includes('INCREASING')) {
+                            signalColor = '#e74c3c';
+                        } else if (signal.includes('DECREASING')) {
+                            signalColor = '#27ae60';
+                        } else if (signal.includes('STABLE')) {
+                            signalColor = '#95a5a6';
+                        }
+                    
+                        // Handle complex signals with multiple components
+                        if (signal.includes('|')) {
+                            const signalParts = signal.split(' | ');
+                            signalDisplay = `<div style="color: ${signalColor}; font-size: 0.9em;">
+                                ${signalParts.map(part => `<div>• ${part.replace(/_/g, ' ')}</div>`).join('')}
+                            </div>`;
+                        } else {
+                            signalDisplay = `<span style="color: ${signalColor}; font-weight: bold;">${signal.replace(/_/g, ' ')}</span>`;
+                        }
+                    
+                        atrElement.innerHTML = `
+                            <div><strong>ATR Value:</strong> ${value.toFixed(4)}</div>
+                            <div><strong>Volatility Signal:</strong> ${signalDisplay}</div>
                         `;
                     }
                 }

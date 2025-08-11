@@ -52,6 +52,7 @@ class TechnicalIndicators:
             'roc_period': 14,
             'momentum_period': 10,
             'momentum_threshold_multiplier': 0.02,
+            'atr_period': 14,
         }
         
         if config:
@@ -91,6 +92,7 @@ class TechnicalIndicators:
         self.cci_values = deque(maxlen=100)
         self.roc_values = deque(maxlen=100)
         self.momentum_values = deque(maxlen=100)
+        self.atr_values = deque(maxlen=100)
         
         # Initialize indicator states
         self.initialize_indicator_states()
@@ -147,6 +149,10 @@ class TechnicalIndicators:
 
         # ROC state
         self.roc_values = deque(maxlen=100)
+
+        # ATR state
+        self.atr_tr_values = deque(maxlen=self.config['atr_period'])
+        self.atr = None
     
     def add_data_point(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Add a new data point and calculate all indicators"""
@@ -233,6 +239,13 @@ class TechnicalIndicators:
             indicators['momentum'] = {
                 'value': momentum,
                 'signal': self.get_momentum_signal(momentum)
+            }
+
+        atr = self.calculate_atr()
+        if atr is not None:
+            indicators['atr'] = {
+                'value': atr,
+                'signal': self.get_atr_signal(atr)
             }
         
         return indicators
@@ -769,6 +782,122 @@ class TechnicalIndicators:
                 return "WEAK_BEARISH"
         else:
             return "NEUTRAL"
+        
+    def calculate_atr(self) -> Optional[float]:
+        """Calculate Average True Range (ATR) indicator"""
+        if len(self.highs) < 2 or len(self.lows) < 2 or len(self.prices) < 2:
+            return None
+
+        # Calculate True Range for current period
+        high = self.highs[-1]
+        low = self.lows[-1]
+        prev_close = self.prices[-2]
+
+        # True Range is the maximum of:
+        # 1. Current High - Current Low
+        # 2. Current High - Previous Close (absolute value)
+        # 3. Current Low - Previous Close (absolute value)
+        tr = max(
+            high - low,
+            abs(high - prev_close),
+            abs(low - prev_close)
+        )
+
+        # Store TR value
+        self.atr_tr_values.append(tr)
+
+        # Need at least the ATR period number of TR values
+        if len(self.atr_tr_values) < self.config['atr_period']:
+            return None
+
+        # Calculate ATR as Simple Moving Average of True Range values
+        if self.atr is None:
+            # First ATR calculation - use simple average
+            self.atr = sum(self.atr_tr_values) / len(self.atr_tr_values)
+        else:
+            # Subsequent ATR calculations using Wilder's method (exponential smoothing)
+            # ATR = (Previous ATR * (n-1) + Current TR) / n
+            self.atr = ((self.atr * (self.config['atr_period'] - 1)) + tr) / self.config['atr_period']
+
+        self.atr_values.append(self.atr)
+        return self.atr
+
+    # def get_atr_signal(self, atr: float) -> str:
+    #     """Get trading signal based on ATR value"""
+    #     if len(self.atr_values) < 2:
+    #         return "NEUTRAL"
+
+    #     # Compare current ATR with previous ATR to determine volatility trend
+    #     prev_atr = list(self.atr_values)[-2]
+    #     atr_change = ((atr - prev_atr) / prev_atr) * 100
+
+    #     if atr_change > 10:
+    #         return "HIGH_VOLATILITY_INCREASING"
+    #     elif atr_change > 5:
+    #         return "VOLATILITY_INCREASING"
+    #     elif atr_change < -10:
+    #         return "VOLATILITY_DECREASING_SIGNIFICANTLY"
+    #     elif atr_change < -5:
+    #         return "VOLATILITY_DECREASING"
+    #     else:
+    #         # You can also add absolute ATR level signals if needed
+    #         # This would require calculating average ATR over longer period
+    #         return "STABLE_VOLATILITY"
+        
+    # Updation to handle the advanced ATR Signal
+    def get_atr_signal(self, atr: float) -> str:
+        """Get trading signal based on ATR value"""
+        if len(self.atr_values) < 2:
+            return "NEUTRAL"
+
+        # Compare current ATR with previous ATR to determine volatility trend
+        prev_atr = list(self.atr_values)[-2]
+        atr_change = ((atr - prev_atr) / prev_atr) * 100
+
+        # Calculate absolute ATR level signals
+        atr_signal_components = []
+
+        # Relative change signals (existing logic)
+        if atr_change > 10:
+            atr_signal_components.append("HIGH_VOLATILITY_INCREASING")
+        elif atr_change > 5:
+            atr_signal_components.append("VOLATILITY_INCREASING")
+        elif atr_change < -10:
+            atr_signal_components.append("VOLATILITY_DECREASING_SIGNIFICANTLY")
+        elif atr_change < -5:
+            atr_signal_components.append("VOLATILITY_DECREASING")
+        else:
+            atr_signal_components.append("STABLE_VOLATILITY")
+
+        # Absolute ATR level signals (new feature)
+        if len(self.atr_values) >= 20:  # Need sufficient history for meaningful comparison
+            # Calculate average ATR over longer period (20 periods)
+            atr_history = list(self.atr_values)[-20:]
+            avg_atr = sum(atr_history) / len(atr_history)
+
+            # Calculate standard deviation of ATR values
+            atr_variance = sum((x - avg_atr) ** 2 for x in atr_history) / len(atr_history)
+            atr_std = atr_variance ** 0.5
+
+            # Define volatility levels based on standard deviations from mean
+            if atr > avg_atr + (2 * atr_std):
+                atr_signal_components.append("EXTREMELY_HIGH_VOLATILITY")
+            elif atr > avg_atr + atr_std:
+                atr_signal_components.append("HIGH_VOLATILITY_LEVEL")
+            elif atr > avg_atr + (0.5 * atr_std):
+                atr_signal_components.append("ABOVE_AVERAGE_VOLATILITY")
+            elif atr < avg_atr - (2 * atr_std):
+                atr_signal_components.append("EXTREMELY_LOW_VOLATILITY")
+            elif atr < avg_atr - atr_std:
+                atr_signal_components.append("LOW_VOLATILITY_LEVEL")
+            elif atr < avg_atr - (0.5 * atr_std):
+                atr_signal_components.append("BELOW_AVERAGE_VOLATILITY")
+            else:
+                atr_signal_components.append("NORMAL_VOLATILITY_LEVEL")
+
+        # Combine signals with separator
+        return " | ".join(atr_signal_components)
+
 
 
     def get_all_indicators(self) -> Dict[str, Any]:
@@ -830,6 +959,10 @@ class TechnicalIndicators:
                     'value': list(self.momentum_values)[-1] if self.momentum_values else None,
                     'signal': self.get_momentum_signal(list(self.momentum_values)[-1]) if self.momentum_values else None
                 } if self.momentum_values else None,
+                'atr': {
+                    'value': list(self.atr_values)[-1] if self.atr_values else None,
+                    'signal': self.get_atr_signal(list(self.atr_values)[-1]) if self.atr_values else None
+                } if self.atr_values else None,
             },
             'configuration': self.config
         }
@@ -841,7 +974,7 @@ class TechnicalIndicators:
         
         # Check if we need to reinitialize data structures
         need_reinit = False
-        for key in ['sma_periods', 'ema_periods', 'macd_slow', 'rsi_period', 'adx_period', 'ichimoku_span_b', 'stochastic_k_period', 'stochastic_d_period', 'cci_period', 'roc_period', 'momentum_period']:
+        for key in ['sma_periods', 'ema_periods', 'macd_slow', 'rsi_period', 'adx_period', 'ichimoku_span_b', 'stochastic_k_period', 'stochastic_d_period', 'cci_period', 'roc_period', 'momentum_period', 'atr_period']:
             if key in new_config and new_config[key] != old_config.get(key):
                 need_reinit = True
                 break
@@ -974,7 +1107,8 @@ async def main():
         'cci_period': 20,
         'roc_period': 14,
         'momentum_period': 10,
-        'momentum_threshold_multiplier': 0.02
+        'momentum_threshold_multiplier': 0.02,
+        'atr_period': 14,
     }
     
     client = TradingDataClient(config=config)
