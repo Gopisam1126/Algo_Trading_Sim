@@ -304,95 +304,6 @@ def get_specific_indicator(indicator):
             'available_indicators': list(current_indicators.keys())
         }), 404
 
-# @app.route('/api/indicators/signals', methods=['GET'])
-# def get_trading_signals():
-#     """Get trading signals from all indicators"""
-#     global current_indicators
-    
-#     if not current_indicators:
-#         return jsonify({
-#             'error': 'No data available',
-#             'message': 'Technical indicators not yet calculated'
-#         }), 404
-    
-#     signals = {}
-    
-#     # Extract signals from indicators
-#     for indicator_name, indicator_data in current_indicators.items():
-#         if isinstance(indicator_data, dict) and 'signal' in indicator_data:
-#             signals[indicator_name] = indicator_data['signal']
-#         elif indicator_name == 'rsi' and isinstance(indicator_data, dict) and 'value' in indicator_data:
-#             # RSI signal logic
-#             rsi_value = indicator_data['value']
-#             if rsi_value > 70:
-#                 signals[indicator_name] = 'OVERBOUGHT'
-#             elif rsi_value < 30:
-#                 signals[indicator_name] = 'OVERSOLD'
-#             else:
-#                 signals[indicator_name] = 'NEUTRAL'
-#         elif indicator_name == 'macd' and isinstance(indicator_data, dict):
-#             # MACD signal logic
-#             if 'macd_line' in indicator_data and 'signal_line' in indicator_data:
-#                 macd_line = indicator_data['macd_line']
-#                 signal_line = indicator_data['signal_line']
-#                 if macd_line > signal_line:
-#                     signals[indicator_name] = 'BUY'
-#                 else:
-#                     signals[indicator_name] = 'SELL'
-#         elif indicator_name == 'stochastic' and isinstance(indicator_data, dict):
-#             signals[indicator_name] = indicator_data.get('signal', 'NEUTRAL')
-#         elif indicator_name == 'cci' and isinstance(indicator_data, dict):
-#             signals[indicator_name] = indicator_data.get('signal', 'NEUTRAL')
-#         elif indicator_name == 'roc' and isinstance(indicator_data, dict):
-#             signals[indicator_name] = indicator_data.get('signal', 'NEUTRAL')
-#         elif indicator_name == 'parabolic_sar' and isinstance(indicator_data, dict):
-#             # Parabolic SAR signal logic
-#             signals[indicator_name] = indicator_data.get('signal', 'NEUTRAL')
-#         elif indicator_name == 'supertrend' and isinstance(indicator_data, dict):
-#             # SuperTrend signal logic
-#             signals[indicator_name] = indicator_data.get('signal', 'NEUTRAL')
-#         elif indicator_name == 'momentum' and isinstance(indicator_data, dict):
-#             signals[indicator_name] = indicator_data.get('signal', 'NEUTRAL')
-#         elif indicator_name == 'adx' and isinstance(indicator_data, dict):
-#             # ADX trend strength indication
-#             adx_value = indicator_data.get('adx', 0)
-#             plus_di = indicator_data.get('plus_di', 0)
-#             minus_di = indicator_data.get('minus_di', 0)
-            
-#             if adx_value > 25:  # Strong trend
-#                 if plus_di > minus_di:
-#                     signals[indicator_name] = 'STRONG_UPTREND'
-#                 else:
-#                     signals[indicator_name] = 'STRONG_DOWNTREND'
-#             else:
-#                 signals[indicator_name] = 'WEAK_TREND'
-#         elif indicator_name == 'ichimoku' and isinstance(indicator_data, dict):
-#             # Ichimoku cloud signal (simplified)
-#             conversion_line = indicator_data.get('conversion_line')
-#             base_line = indicator_data.get('base_line')
-            
-#             if conversion_line and base_line:
-#                 if conversion_line > base_line:
-#                     signals[indicator_name] = 'BULLISH'
-#                 else:
-#                     signals[indicator_name] = 'BEARISH'
-#             else:
-#                 signals[indicator_name] = 'NEUTRAL'
-    
-#     return jsonify({
-#         'timestamp': datetime.now().isoformat(),
-#         'signals': signals,
-#         'summary': {
-#             'buy_signals': len([s for s in signals.values() if s in ['BUY', 'BULLISH_CROSSOVER', 'BULLISH']]),
-#             'sell_signals': len([s for s in signals.values() if s in ['SELL', 'BEARISH_CROSSOVER', 'BEARISH']]),
-#             'neutral_signals': len([s for s in signals.values() if s == 'NEUTRAL']),
-#             'overbought_signals': len([s for s in signals.values() if s == 'OVERBOUGHT']),
-#             'oversold_signals': len([s for s in signals.values() if s == 'OVERSOLD']),
-#             'strong_trend_signals': len([s for s in signals.values() if 'STRONG' in s]),
-#             'weak_trend_signals': len([s for s in signals.values() if 'WEAK' in s])
-#         }
-#     })
-
 @app.route('/api/indicators/signals', methods=['GET'])
 def get_trading_signals():
     """Get trading signals from all indicators with volatility analysis"""
@@ -525,6 +436,7 @@ def get_trading_signals():
                     signals[indicator_name] = 'STRONG_DOWNTREND'
             else:
                 signals[indicator_name] = 'WEAK_TREND'
+        
         elif indicator_name == 'ichimoku' and isinstance(indicator_data, dict):
             # Ichimoku cloud signal (simplified)
             conversion_line = indicator_data.get('conversion_line')
@@ -537,6 +449,10 @@ def get_trading_signals():
                     signals[indicator_name] = 'BEARISH'
             else:
                 signals[indicator_name] = 'NEUTRAL'
+        
+        elif indicator_name == 'fibonacci' and isinstance(indicator_data, dict):
+            # Fibonacci retracement signal logic
+            signals[indicator_name] = indicator_data.get('signal', 'NEUTRAL')
 
         return jsonify({
             'timestamp': datetime.now().isoformat(),
@@ -553,7 +469,11 @@ def get_trading_signals():
                 'low_volatility_signals': len([s for s in signals.values() if 'LOW_VOLATILITY' in s or 'EXTREMELY_LOW_VOLATILITY' in s]),
                 'increasing_volatility_signals': len([s for s in signals.values() if 'INCREASING' in s]),
                 'decreasing_volatility_signals': len([s for s in signals.values() if 'DECREASING' in s]),
-                'stable_volatility_signals': len([s for s in signals.values() if 'STABLE_VOLATILITY' in s])
+                'stable_volatility_signals': len([s for s in signals.values() if 'STABLE_VOLATILITY' in s]),
+                'fibonacci_support_signals': len([s for s in signals.values() if 'SUPPORT' in s]),
+                'fibonacci_resistance_signals': len([s for s in signals.values() if 'RESISTANCE' in s]),
+                'fibonacci_retracement_signals': len([s for s in signals.values() if 'RETRACEMENT' in s]),
+                'fibonacci_continuation_signals': len([s for s in signals.values() if 'CONTINUATION' in s])
             }
         })
 
@@ -591,6 +511,8 @@ if __name__ == '__main__':
         'momentum_period': 10,
         'momentum_threshold_multiplier': 0.02,
         'atr_period': 14,
+        'fibonacci_period': 20,
+        'fibonacci_levels': [0.236, 0.382, 0.5, 0.618, 0.786],
     }
     
     try:

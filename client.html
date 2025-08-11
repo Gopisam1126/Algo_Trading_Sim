@@ -562,6 +562,20 @@
                 </div>
             </div>
 
+            <div class="config-section">
+                <h3>Fibonacci Retracement</h3>
+                <div class="config-grid">
+                    <div class="config-item">
+                        <label for="fibonacciPeriod">Period:</label>
+                        <input type="number" id="fibonacciPeriod" value="20" min="1" max="100">
+                    </div>
+                    <div class="config-item">
+                        <label for="fibonacciLevels">Levels (comma-separated):</label>
+                        <input type="text" id="fibonacciLevels" value="0.236,0.382,0.5,0.618,0.786" placeholder="0.236,0.382,0.5,0.618,0.786">
+                    </div>
+                </div>
+            </div>
+
             <div style="margin-top: 20px;">
                 <button class="btn btn-warning" onclick="resetConfig()">Reset to Default</button>
                 <button class="btn btn-success" onclick="saveConfig()">Save Configuration</button>
@@ -716,6 +730,14 @@
                     </div>
                 </div>
 
+                <!-- Fibonacci Retracement -->
+                 <div class="indicator-section">
+                    <h4>Fibonacci Retracement</h4>
+                    <div id="fibonacciData">
+                        <div>Calculating...</div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -769,6 +791,8 @@
             momentum_period: 10,
             momentum_threshold_multiplier: 0.02,
             atr_period: 14,
+            fibonacci_period: 20,
+            fibonacci_levels: [0.236, 0.382, 0.5, 0.618, 0.786],
         };
 
         // Technical indicators data storage
@@ -784,7 +808,8 @@
             cci: {},
             roc: {},
             momentum: {},
-            atr: {}
+            atr: {},
+            fibonacci: {}
         };
 
         function updateIndicatorsConfig() {
@@ -792,6 +817,7 @@
                 // Get configuration from form inputs
                 const smaPeriodsStr = document.getElementById('smaPeriods').value;
                 const emaPeriodsStr = document.getElementById('emaPeriods').value;
+                const fibonacciLevelsStr =  document.getElementById('fibonacciLevels').value;
                 
                 indicatorsConfig = {
                     sma_periods: smaPeriodsStr.split(',').map(p => parseInt(p.trim())).filter(p => !isNaN(p)),
@@ -816,6 +842,8 @@
                     momentum_period: parseInt(document.getElementById('momentumPeriod').value) || 10,
                     momentum_threshold_multiplier: parseFloat(document.getElementById('momentumThreshold').value) || 0.02,
                     atr_period: parseInt(document.getElementById('atrPeriod')?.value) || 14,
+                    fibonacci_period: parseInt(document.getElementById('fibonacciPeriod').value) || 20,
+                    fibonacci_levels: fibonacciLevelsStr.split(',').map(l => parseFloat(l.trim())).filter(l => !isNaN(l)),
                 };
                 
                 addLog('📊 Technical indicators configuration updated', 'info');
@@ -868,6 +896,8 @@
                 document.getElementById('momentumPeriod').value = '10';
                 document.getElementById('momentumThreshold').value = '0.02';
                 document.getElementById('atrPeriod').value = '14';
+                document.getElementById('fibonacciPeriod').value = '20';
+                document.getElementById('fibonacciLevels').value = '0.236,0.382,0.5,0.618,0.786';
                 
                 addLog('🔄 Configuration reset to defaults', 'info');
             } catch (error) {
@@ -923,7 +953,7 @@
         }
 
         function showIndicatorsUnavailable() {
-            const sections = ['movingAveragesData', 'macdData', 'rsiData', 'adxData', 'psarData', 'ichimokuData', 'supertrendData', 'stochasticData', 'cciData', 'momentumData', 'atrData'];
+            const sections = ['movingAveragesData', 'macdData', 'rsiData', 'adxData', 'psarData', 'ichimokuData', 'supertrendData', 'stochasticData', 'cciData', 'momentumData', 'atrData', 'fibonacciData'];
             sections.forEach(sectionId => {
                 const element = document.getElementById(sectionId);
                 if (element) {
@@ -1164,6 +1194,40 @@
                             <div><strong>ATR Value:</strong> ${value.toFixed(4)}</div>
                             <div><strong>Volatility Signal:</strong> ${signalDisplay}</div>
                         `;
+                    }
+                }
+
+                // Update Fibonacci
+                if (indicators.fibonacci) {
+                    const fibonacci = indicators.fibonacci;
+                    const fibonacciElement = document.getElementById('fibonacciData');
+
+                    if (fibonacciElement) {
+                        let fibHtml = `
+                            <div><strong>Range:</strong> ₹${fibonacci.swing_high?.toFixed(2) || 'N/A'} - ₹${fibonacci.swing_low?.toFixed(2) || 'N/A'}</div>
+                            <div><strong>Signal:</strong> ${fibonacci.signal || 'N/A'}</div>
+                        `;
+                    
+                        if (fibonacci.levels) {
+                            fibHtml += '<div style="margin-top: 8px; font-size: 0.9em;"><strong>Levels:</strong></div>';
+                        
+                            const fibLevels = [
+                                { key: 'fib_0.236', percentage: '23.6%' },
+                                { key: 'fib_0.382', percentage: '38.2%' },
+                                { key: 'fib_0.500', percentage: '50.0%' },
+                                { key: 'fib_0.618', percentage: '61.8%' },
+                                { key: 'fib_0.786', percentage: '78.6%' }
+                            ];
+                        
+                            for (const fibLevel of fibLevels) {
+                                const value = fibonacci.levels[fibLevel.key];
+                                if (value !== null && value !== undefined && !isNaN(value)) {
+                                    fibHtml += `<div style="font-size: 0.85em;">• ${fibLevel.percentage}: ₹${value.toFixed(2)}</div>`;
+                                }
+                            }
+                        }
+                    
+                        fibonacciElement.innerHTML = fibHtml;
                     }
                 }
 

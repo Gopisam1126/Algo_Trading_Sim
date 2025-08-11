@@ -53,6 +53,8 @@ class TechnicalIndicators:
             'momentum_period': 10,
             'momentum_threshold_multiplier': 0.02,
             'atr_period': 14,
+            'fibonacci_period': 20,  # Period to look back for swing high/low
+            'fibonacci_levels': [0.236, 0.382, 0.5, 0.618, 0.786],  # Standard Fibonacci levels
         }
         
         if config:
@@ -69,7 +71,7 @@ class TechnicalIndicators:
             [self.config['macd_slow'], self.config['rsi_period'], 
              self.config['adx_period'], self.config['ichimoku_span_b'], 
              self.config['cci_period'], self.config['roc_period'],
-             self.config['momentum_period']]
+             self.config['momentum_period'], self.config['fibonacci_period']]
         )
         
         # Price data
@@ -93,6 +95,7 @@ class TechnicalIndicators:
         self.roc_values = deque(maxlen=100)
         self.momentum_values = deque(maxlen=100)
         self.atr_values = deque(maxlen=100)
+        self.fibonacci_values = deque(maxlen=100)
         
         # Initialize indicator states
         self.initialize_indicator_states()
@@ -153,6 +156,12 @@ class TechnicalIndicators:
         # ATR state
         self.atr_tr_values = deque(maxlen=self.config['atr_period'])
         self.atr = None
+
+        # Fibonacci Retracement
+        self.fibonacci_swing_high = None
+        self.fibonacci_swing_low = None
+        self.fibonacci_levels_cache = {}
+        self.fibonacci_trend_direction = None
     
     def add_data_point(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Add a new data point and calculate all indicators"""
@@ -247,6 +256,11 @@ class TechnicalIndicators:
                 'value': atr,
                 'signal': self.get_atr_signal(atr)
             }
+
+        # Fibonacci Retracement
+        fibonacci_data = self.calculate_fibonacci_retracement()
+        if fibonacci_data:
+            indicators['fibonacci'] = fibonacci_data
         
         return indicators
     
@@ -793,10 +807,6 @@ class TechnicalIndicators:
         low = self.lows[-1]
         prev_close = self.prices[-2]
 
-        # True Range is the maximum of:
-        # 1. Current High - Current Low
-        # 2. Current High - Previous Close (absolute value)
-        # 3. Current Low - Previous Close (absolute value)
         tr = max(
             high - low,
             abs(high - prev_close),
@@ -821,28 +831,6 @@ class TechnicalIndicators:
 
         self.atr_values.append(self.atr)
         return self.atr
-
-    # def get_atr_signal(self, atr: float) -> str:
-    #     """Get trading signal based on ATR value"""
-    #     if len(self.atr_values) < 2:
-    #         return "NEUTRAL"
-
-    #     # Compare current ATR with previous ATR to determine volatility trend
-    #     prev_atr = list(self.atr_values)[-2]
-    #     atr_change = ((atr - prev_atr) / prev_atr) * 100
-
-    #     if atr_change > 10:
-    #         return "HIGH_VOLATILITY_INCREASING"
-    #     elif atr_change > 5:
-    #         return "VOLATILITY_INCREASING"
-    #     elif atr_change < -10:
-    #         return "VOLATILITY_DECREASING_SIGNIFICANTLY"
-    #     elif atr_change < -5:
-    #         return "VOLATILITY_DECREASING"
-    #     else:
-    #         # You can also add absolute ATR level signals if needed
-    #         # This would require calculating average ATR over longer period
-    #         return "STABLE_VOLATILITY"
         
     # Updation to handle the advanced ATR Signal
     def get_atr_signal(self, atr: float) -> str:
@@ -897,8 +885,164 @@ class TechnicalIndicators:
 
         # Combine signals with separator
         return " | ".join(atr_signal_components)
+    
+    # Fibonacci Retracement
 
+    def calculate_fibonacci_retracement(self) -> Optional[Dict[str, Any]]:
+        """Calculate Fibonacci Retracement levels"""
+        if len(self.highs) < self.config['fibonacci_period'] or len(self.lows) < self.config['fibonacci_period']:
+            return None
 
+        # Get recent price data for the specified period
+        recent_highs = list(self.highs)[-self.config['fibonacci_period']:]
+        recent_lows = list(self.lows)[-self.config['fibonacci_period']:]
+        recent_prices = list(self.prices)[-self.config['fibonacci_period']:]
+
+        # Find swing high and swing low
+        swing_high = max(recent_highs)
+        swing_low = min(recent_lows)
+
+        # Determine trend direction
+        current_price = self.prices[-1]
+        price_range = swing_high - swing_low
+
+        if price_range == 0:
+            return None
+
+        # Determine if we're in an uptrend or downtrend
+        # Check if current price is closer to swing high (uptrend) or swing low (downtrend)
+        mid_point = (swing_high + swing_low) / 2
+        trend_direction = 'up' if current_price > mid_point else 'down'
+
+        # Calculate Fibonacci levels
+        fibonacci_levels = {}
+
+        if trend_direction == 'up':
+            # In uptrend, calculate retracement levels from swing high
+            for level in self.config['fibonacci_levels']:
+                retracement_price = swing_high - (price_range * level)
+                fibonacci_levels[f'fib_{level:.3f}'] = retracement_price
+        else:
+            # In downtrend, calculate extension levels from swing low
+            for level in self.config['fibonacci_levels']:
+                extension_price = swing_low + (price_range * level)
+                fibonacci_levels[f'fib_{level:.3f}'] = extension_price
+
+        # Store current values
+        self.fibonacci_swing_high = swing_high
+        self.fibonacci_swing_low = swing_low
+        self.fibonacci_levels_cache = fibonacci_levels
+        self.fibonacci_trend_direction = trend_direction
+
+        # Determine which Fibonacci level is closest to current price
+        closest_level = self.find_closest_fibonacci_level(current_price, fibonacci_levels)
+
+        # Generate trading signal
+        signal = self.get_fibonacci_signal(current_price, fibonacci_levels, trend_direction)
+
+        fibonacci_data = {
+            'swing_high': swing_high,
+            'swing_low': swing_low,
+            'price_range': price_range,
+            'trend_direction': trend_direction,
+            'levels': fibonacci_levels,
+            'closest_level': closest_level,
+            'signal': signal,
+            'current_price': current_price
+        }
+
+        self.fibonacci_values.append(fibonacci_data)
+        return fibonacci_data
+
+    def find_closest_fibonacci_level(self, current_price: float, fibonacci_levels: Dict[str, float]) -> Dict[str, Any]:
+        """Find the closest Fibonacci level to current price"""
+        if not fibonacci_levels:
+            return None
+
+        closest_distance = float('inf')
+        closest_level_name = None
+        closest_level_price = None
+
+        for level_name, level_price in fibonacci_levels.items():
+            distance = abs(current_price - level_price)
+            if distance < closest_distance:
+                closest_distance = distance
+                closest_level_name = level_name
+                closest_level_price = level_price
+
+        return {
+            'level_name': closest_level_name,
+            'level_price': closest_level_price,
+            'distance': closest_distance,
+            'distance_percentage': (closest_distance / current_price) * 100
+        }
+
+    def get_fibonacci_signal(self, current_price: float, fibonacci_levels: Dict[str, float], trend_direction: str) -> str:
+        """Get trading signal based on Fibonacci levels"""
+        if not fibonacci_levels:
+            return "NEUTRAL"
+
+        # Get the closest level info
+        closest_level = self.find_closest_fibonacci_level(current_price, fibonacci_levels)
+
+        if not closest_level:
+            return "NEUTRAL"
+
+        distance_percentage = closest_level['distance_percentage']
+        level_name = closest_level['level_name']
+        level_price = closest_level['level_price']
+
+        # Define proximity threshold (when price is very close to a Fibonacci level)
+        proximity_threshold = 0.5  # 0.5% distance threshold
+
+        # Strong signal when price is very close to key Fibonacci levels
+        if distance_percentage < proximity_threshold:
+            # 61.8% (Golden Ratio) and 38.2% are the most significant levels
+            if '0.618' in level_name or '0.382' in level_name:
+                if trend_direction == 'up' and current_price < level_price:
+                    return "STRONG_SUPPORT_BOUNCE"
+                elif trend_direction == 'down' and current_price > level_price:
+                    return "STRONG_RESISTANCE_REJECTION"
+
+            # 50% level (psychological level)
+            elif '0.500' in level_name:
+                if trend_direction == 'up' and current_price < level_price:
+                    return "SUPPORT_BOUNCE"
+                elif trend_direction == 'down' and current_price > level_price:
+                    return "RESISTANCE_REJECTION"
+
+            # Other levels (23.6%, 78.6%)
+            else:
+                if trend_direction == 'up' and current_price < level_price:
+                    return "WEAK_SUPPORT"
+                elif trend_direction == 'down' and current_price > level_price:
+                    return "WEAK_RESISTANCE"
+
+        # Medium distance signals
+        elif distance_percentage < 2.0:
+            if '0.618' in level_name or '0.382' in level_name:
+                if trend_direction == 'up':
+                    return "APPROACHING_SUPPORT" if current_price > level_price else "APPROACHING_RESISTANCE"
+                else:
+                    return "APPROACHING_RESISTANCE" if current_price > level_price else "APPROACHING_SUPPORT"
+
+        # Trend continuation signals based on position relative to key levels
+        fib_618 = fibonacci_levels.get('fib_0.618')
+        fib_382 = fibonacci_levels.get('fib_0.382')
+
+        if fib_618 and fib_382:
+            if trend_direction == 'up':
+                if current_price > fib_382:
+                    return "TREND_CONTINUATION_BULLISH"
+                elif current_price < fib_618:
+                    return "RETRACEMENT_DEEP"
+            else:
+                if current_price < fib_382:
+                    return "TREND_CONTINUATION_BEARISH"
+                elif current_price > fib_618:
+                    return "RETRACEMENT_DEEP"
+
+        return "NEUTRAL"
 
     def get_all_indicators(self) -> Dict[str, Any]:
         """Get all calculated indicators in a structured format"""
@@ -963,6 +1107,14 @@ class TechnicalIndicators:
                     'value': list(self.atr_values)[-1] if self.atr_values else None,
                     'signal': self.get_atr_signal(list(self.atr_values)[-1]) if self.atr_values else None
                 } if self.atr_values else None,
+                'fibonacci': {
+                    'swing_high': list(self.fibonacci_values)[-1]['swing_high'] if self.fibonacci_values else None,
+                    'swing_low': list(self.fibonacci_values)[-1]['swing_low'] if self.fibonacci_values else None,
+                    'trend_direction': list(self.fibonacci_values)[-1]['trend_direction'] if self.fibonacci_values else None,
+                    'levels': list(self.fibonacci_values)[-1]['levels'] if self.fibonacci_values else None,
+                    'closest_level': list(self.fibonacci_values)[-1]['closest_level'] if self.fibonacci_values else None,
+                    'signal': list(self.fibonacci_values)[-1]['signal'] if self.fibonacci_values else None
+                } if self.fibonacci_values else None,
             },
             'configuration': self.config
         }
@@ -974,7 +1126,7 @@ class TechnicalIndicators:
         
         # Check if we need to reinitialize data structures
         need_reinit = False
-        for key in ['sma_periods', 'ema_periods', 'macd_slow', 'rsi_period', 'adx_period', 'ichimoku_span_b', 'stochastic_k_period', 'stochastic_d_period', 'cci_period', 'roc_period', 'momentum_period', 'atr_period']:
+        for key in ['sma_periods', 'ema_periods', 'macd_slow', 'rsi_period', 'adx_period', 'ichimoku_span_b', 'stochastic_k_period', 'stochastic_d_period', 'cci_period', 'roc_period', 'momentum_period', 'atr_period', 'fibonacci_period']:
             if key in new_config and new_config[key] != old_config.get(key):
                 need_reinit = True
                 break
@@ -1109,6 +1261,8 @@ async def main():
         'momentum_period': 10,
         'momentum_threshold_multiplier': 0.02,
         'atr_period': 14,
+        'fibonacci_period': 20,  # Add this line
+        'fibonacci_levels': [0.236, 0.382, 0.5, 0.618, 0.786],
     }
     
     client = TradingDataClient(config=config)
