@@ -55,6 +55,7 @@ class TechnicalIndicators:
             'atr_period': 14,
             'fibonacci_period': 20,  # Period to look back for swing high/low
             'fibonacci_levels': [0.236, 0.382, 0.5, 0.618, 0.786],  # Standard Fibonacci levels
+            'vwap_period': 20,
         }
         
         if config:
@@ -71,7 +72,8 @@ class TechnicalIndicators:
             [self.config['macd_slow'], self.config['rsi_period'], 
              self.config['adx_period'], self.config['ichimoku_span_b'], 
              self.config['cci_period'], self.config['roc_period'],
-             self.config['momentum_period'], self.config['fibonacci_period']]
+             self.config['momentum_period'], self.config['fibonacci_period'],
+             self.config['vwap_period']]
         )
         
         # Price data
@@ -96,6 +98,7 @@ class TechnicalIndicators:
         self.momentum_values = deque(maxlen=100)
         self.atr_values = deque(maxlen=100)
         self.fibonacci_values = deque(maxlen=100)
+        self.vwap_values = deque(maxlen=100)
         
         # Initialize indicator states
         self.initialize_indicator_states()
@@ -162,6 +165,12 @@ class TechnicalIndicators:
         self.fibonacci_swing_low = None
         self.fibonacci_levels_cache = {}
         self.fibonacci_trend_direction = None
+
+        # VMAP
+        self.vwap_cumulative_volume = 0
+        self.vwap_cumulative_pv = 0  # Price * Volume
+        self.vwap_period_volumes = deque(maxlen=self.config['vwap_period'])
+        self.vwap_period_pv = deque(maxlen=self.config['vwap_period'])
     
     def add_data_point(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Add a new data point and calculate all indicators"""
@@ -261,6 +270,14 @@ class TechnicalIndicators:
         fibonacci_data = self.calculate_fibonacci_retracement()
         if fibonacci_data:
             indicators['fibonacci'] = fibonacci_data
+
+        # VWAP
+        vwap = self.calculate_vwap()
+        if vwap is not None:
+            indicators['vwap'] = {
+                'value': vwap,
+                'signal': self.get_vwap_signal(vwap, price)
+            }
         
         return indicators
     
@@ -1043,6 +1060,72 @@ class TechnicalIndicators:
                     return "RETRACEMENT_DEEP"
 
         return "NEUTRAL"
+    
+    def calculate_vwap(self) -> Optional[float]:
+        """Calculate Volume Weighted Average Price (VWAP)"""
+        if len(self.prices) < 1 or len(self.volumes) < 1:
+            return None
+
+        current_price = self.prices[-1]
+        current_volume = self.volumes[-1]
+
+        if current_volume == 0:
+            # If no volume data, return None or current price
+            return None
+
+        # Calculate typical price for current period
+        if len(self.highs) >= 1 and len(self.lows) >= 1:
+            typical_price = (self.highs[-1] + self.lows[-1] + current_price) / 3
+        else:
+            typical_price = current_price
+
+        # Calculate Price * Volume for current period
+        pv = typical_price * current_volume
+
+        # Store current period data
+        self.vwap_period_volumes.append(current_volume)
+        self.vwap_period_pv.append(pv)
+
+        # Calculate VWAP over the specified period
+        if len(self.vwap_period_volumes) >= min(self.config['vwap_period'], 1):
+            # Use available data up to the specified period
+            total_volume = sum(self.vwap_period_volumes)
+            total_pv = sum(self.vwap_period_pv)
+
+            if total_volume == 0:
+                return None
+
+            vwap = total_pv / total_volume
+            self.vwap_values.append(vwap)
+            return vwap
+
+        return None
+
+    def get_vwap_signal(self, vwap: float, current_price: float) -> str:
+        """Get trading signal based on VWAP value"""
+        if vwap is None or current_price is None:
+            return "NEUTRAL"
+
+        # Calculate percentage difference between current price and VWAP
+        price_diff_percentage = ((current_price - vwap) / vwap) * 100
+
+        # Basic VWAP signals
+        if current_price > vwap:
+            if price_diff_percentage > 2.0:
+                return "STRONG_BULLISH_ABOVE_VWAP"
+            elif price_diff_percentage > 0.5:
+                return "BULLISH_ABOVE_VWAP"
+            else:
+                return "SLIGHTLY_ABOVE_VWAP"
+        elif current_price < vwap:
+            if price_diff_percentage < -2.0:
+                return "STRONG_BEARISH_BELOW_VWAP"
+            elif price_diff_percentage < -0.5:
+                return "BEARISH_BELOW_VWAP"
+            else:
+                return "SLIGHTLY_BELOW_VWAP"
+        else:
+            return "AT_VWAP"
 
     def get_all_indicators(self) -> Dict[str, Any]:
         """Get all calculated indicators in a structured format"""
@@ -1115,6 +1198,13 @@ class TechnicalIndicators:
                     'closest_level': list(self.fibonacci_values)[-1]['closest_level'] if self.fibonacci_values else None,
                     'signal': list(self.fibonacci_values)[-1]['signal'] if self.fibonacci_values else None
                 } if self.fibonacci_values else None,
+                'vwap': {
+                    'value': list(self.vwap_values)[-1] if self.vwap_values else None,
+                    'signal': self.get_vwap_signal(
+                        list(self.vwap_values)[-1] if self.vwap_values else None,
+                        list(self.prices)[-1] if self.prices else None
+                    ) if self.vwap_values and self.prices else None
+                } if self.vwap_values else None,
             },
             'configuration': self.config
         }
@@ -1126,7 +1216,7 @@ class TechnicalIndicators:
         
         # Check if we need to reinitialize data structures
         need_reinit = False
-        for key in ['sma_periods', 'ema_periods', 'macd_slow', 'rsi_period', 'adx_period', 'ichimoku_span_b', 'stochastic_k_period', 'stochastic_d_period', 'cci_period', 'roc_period', 'momentum_period', 'atr_period', 'fibonacci_period']:
+        for key in ['sma_periods', 'ema_periods', 'macd_slow', 'rsi_period', 'adx_period', 'ichimoku_span_b', 'stochastic_k_period', 'stochastic_d_period', 'cci_period', 'roc_period', 'momentum_period', 'atr_period', 'fibonacci_period', 'vwap_period']:
             if key in new_config and new_config[key] != old_config.get(key):
                 need_reinit = True
                 break
@@ -1261,8 +1351,9 @@ async def main():
         'momentum_period': 10,
         'momentum_threshold_multiplier': 0.02,
         'atr_period': 14,
-        'fibonacci_period': 20,  # Add this line
+        'fibonacci_period': 20,
         'fibonacci_levels': [0.236, 0.382, 0.5, 0.618, 0.786],
+        'vwap_period': 20,
     }
     
     client = TradingDataClient(config=config)

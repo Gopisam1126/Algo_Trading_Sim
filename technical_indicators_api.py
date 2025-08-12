@@ -453,29 +453,119 @@ def get_trading_signals():
         elif indicator_name == 'fibonacci' and isinstance(indicator_data, dict):
             # Fibonacci retracement signal logic
             signals[indicator_name] = indicator_data.get('signal', 'NEUTRAL')
+        
+        elif indicator_name == 'vwap' and isinstance(indicator_data, dict):
+            # Enhanced VWAP signal logic with detailed analysis
+            vwap_signal = indicator_data.get('signal', 'NEUTRAL')
+            vwap_value = indicator_data.get('value')
+            signals[indicator_name] = vwap_signal
 
-        return jsonify({
-            'timestamp': datetime.now().isoformat(),
-            'signals': signals,
-            'summary': {
-                'buy_signals': len([s for s in signals.values() if s in ['BUY', 'BULLISH_CROSSOVER', 'BULLISH']]),
-                'sell_signals': len([s for s in signals.values() if s in ['SELL', 'BEARISH_CROSSOVER', 'BEARISH']]),
-                'neutral_signals': len([s for s in signals.values() if s == 'NEUTRAL']),
-                'overbought_signals': len([s for s in signals.values() if s == 'OVERBOUGHT']),
-                'oversold_signals': len([s for s in signals.values() if s == 'OVERSOLD']),
-                'strong_trend_signals': len([s for s in signals.values() if 'STRONG' in s]),
-                'weak_trend_signals': len([s for s in signals.values() if 'WEAK' in s]),
-                'high_volatility_signals': len([s for s in signals.values() if 'HIGH_VOLATILITY' in s or 'EXTREMELY_HIGH_VOLATILITY' in s]),
-                'low_volatility_signals': len([s for s in signals.values() if 'LOW_VOLATILITY' in s or 'EXTREMELY_LOW_VOLATILITY' in s]),
-                'increasing_volatility_signals': len([s for s in signals.values() if 'INCREASING' in s]),
-                'decreasing_volatility_signals': len([s for s in signals.values() if 'DECREASING' in s]),
-                'stable_volatility_signals': len([s for s in signals.values() if 'STABLE_VOLATILITY' in s]),
-                'fibonacci_support_signals': len([s for s in signals.values() if 'SUPPORT' in s]),
-                'fibonacci_resistance_signals': len([s for s in signals.values() if 'RESISTANCE' in s]),
-                'fibonacci_retracement_signals': len([s for s in signals.values() if 'RETRACEMENT' in s]),
-                'fibonacci_continuation_signals': len([s for s in signals.values() if 'CONTINUATION' in s])
-            }
-        })
+            # Add VWAP-specific analysis to volatility_analysis if it doesn't exist
+            if not volatility_analysis:
+                # Get current price for VWAP analysis
+                current_price = current_price_data.get('price_data', {}).get('price') if current_price_data else None
+
+                if vwap_value and current_price:
+                    vwap_analysis = {
+                        'vwap_value': vwap_value,
+                        'current_price': current_price,
+                        'price_vs_vwap_percentage': ((current_price - vwap_value) / vwap_value) * 100 if vwap_value != 0 else 0,
+                        'signal': vwap_signal,
+                        'interpretation': {
+                            'price_position': None,
+                            'strength': None,
+                            'trading_implications': []
+                        }
+                    }
+
+                    # Interpret VWAP signals
+                    if 'STRONG_BULLISH' in vwap_signal:
+                        vwap_analysis['interpretation']['price_position'] = 'Significantly above VWAP'
+                        vwap_analysis['interpretation']['strength'] = 'Strong bullish momentum'
+                        vwap_analysis['interpretation']['trading_implications'].extend([
+                            'Strong buying pressure',
+                            'Price trading well above institutional average',
+                            'Momentum continuation likely'
+                        ])
+                    elif 'BULLISH_ABOVE_VWAP' in vwap_signal:
+                        vwap_analysis['interpretation']['price_position'] = 'Above VWAP'
+                        vwap_analysis['interpretation']['strength'] = 'Moderate bullish'
+                        vwap_analysis['interpretation']['trading_implications'].extend([
+                            'Price above institutional average',
+                            'Bullish bias present'
+                        ])
+                    elif 'SLIGHTLY_ABOVE_VWAP' in vwap_signal:
+                        vwap_analysis['interpretation']['price_position'] = 'Slightly above VWAP'
+                        vwap_analysis['interpretation']['strength'] = 'Weak bullish'
+                        vwap_analysis['interpretation']['trading_implications'].append('Near institutional average - watch for direction')
+                    elif 'STRONG_BEARISH' in vwap_signal:
+                        vwap_analysis['interpretation']['price_position'] = 'Significantly below VWAP'
+                        vwap_analysis['interpretation']['strength'] = 'Strong bearish momentum'
+                        vwap_analysis['interpretation']['trading_implications'].extend([
+                            'Strong selling pressure',
+                            'Price trading well below institutional average',
+                            'Downward momentum likely to continue'
+                        ])
+                    elif 'BEARISH_BELOW_VWAP' in vwap_signal:
+                        vwap_analysis['interpretation']['price_position'] = 'Below VWAP'
+                        vwap_analysis['interpretation']['strength'] = 'Moderate bearish'
+                        vwap_analysis['interpretation']['trading_implications'].extend([
+                            'Price below institutional average',
+                            'Bearish bias present'
+                        ])
+                    elif 'SLIGHTLY_BELOW_VWAP' in vwap_signal:
+                        vwap_analysis['interpretation']['price_position'] = 'Slightly below VWAP'
+                        vwap_analysis['interpretation']['strength'] = 'Weak bearish'
+                        vwap_analysis['interpretation']['trading_implications'].append('Near institutional average - watch for direction')
+                    elif 'AT_VWAP' in vwap_signal:
+                        vwap_analysis['interpretation']['price_position'] = 'At VWAP'
+                        vwap_analysis['interpretation']['strength'] = 'Neutral'
+                        vwap_analysis['interpretation']['trading_implications'].extend([
+                            'Price at institutional average',
+                            'Decision point - watch for breakout direction'
+                        ])
+
+                    # Add VWAP analysis to response (you can modify this based on your needs)
+                    if not volatility_analysis:
+                        volatility_analysis = vwap_analysis
+                    else:
+                        # If volatility_analysis exists, add VWAP data to it
+                        volatility_analysis['vwap_analysis'] = vwap_analysis
+
+    # Prepare response data
+    response_data = {
+        'timestamp': datetime.now().isoformat(),
+        'signals': signals,
+        'summary': {
+            'buy_signals': len([s for s in signals.values() if s in ['BUY', 'BULLISH_CROSSOVER', 'BULLISH']]),
+            'sell_signals': len([s for s in signals.values() if s in ['SELL', 'BEARISH_CROSSOVER', 'BEARISH']]),
+            'neutral_signals': len([s for s in signals.values() if s == 'NEUTRAL']),
+            'overbought_signals': len([s for s in signals.values() if s == 'OVERBOUGHT']),
+            'oversold_signals': len([s for s in signals.values() if s == 'OVERSOLD']),
+            'strong_trend_signals': len([s for s in signals.values() if 'STRONG' in s]),
+            'weak_trend_signals': len([s for s in signals.values() if 'WEAK' in s]),
+            'high_volatility_signals': len([s for s in signals.values() if 'HIGH_VOLATILITY' in s or 'EXTREMELY_HIGH_VOLATILITY' in s]),
+            'low_volatility_signals': len([s for s in signals.values() if 'LOW_VOLATILITY' in s or 'EXTREMELY_LOW_VOLATILITY' in s]),
+            'increasing_volatility_signals': len([s for s in signals.values() if 'INCREASING' in s]),
+            'decreasing_volatility_signals': len([s for s in signals.values() if 'DECREASING' in s]),
+            'stable_volatility_signals': len([s for s in signals.values() if 'STABLE_VOLATILITY' in s]),
+            'fibonacci_support_signals': len([s for s in signals.values() if 'SUPPORT' in s]),
+            'fibonacci_resistance_signals': len([s for s in signals.values() if 'RESISTANCE' in s]),
+            'fibonacci_retracement_signals': len([s for s in signals.values() if 'RETRACEMENT' in s]),
+            'fibonacci_continuation_signals': len([s for s in signals.values() if 'CONTINUATION' in s]),
+            'vwap_bullish_signals': len([s for s in signals.values() if 'BULLISH' in s and 'VWAP' in s]),
+            'vwap_bearish_signals': len([s for s in signals.values() if 'BEARISH' in s and 'VWAP' in s]),
+            'above_vwap_signals': len([s for s in signals.values() if 'ABOVE_VWAP' in s]),
+            'below_vwap_signals': len([s for s in signals.values() if 'BELOW_VWAP' in s]),
+            'at_vwap_signals': len([s for s in signals.values() if 'AT_VWAP' in s]),
+        }
+    }
+
+    # Add volatility analysis if available
+    if volatility_analysis:
+        response_data['analysis'] = volatility_analysis
+
+    return jsonify(response_data)
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -513,6 +603,7 @@ if __name__ == '__main__':
         'atr_period': 14,
         'fibonacci_period': 20,
         'fibonacci_levels': [0.236, 0.382, 0.5, 0.618, 0.786],
+        'vwap_period': 20,
     }
     
     try:

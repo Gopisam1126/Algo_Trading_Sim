@@ -576,6 +576,16 @@
                 </div>
             </div>
 
+            <div class="config-section">
+                <h3>VWAP (Volume Weighted Average Price)</h3>
+                <div class="config-grid">
+                    <div class="config-item">
+                        <label for="vwapPeriod">VWAP Period:</label>
+                        <input type="number" id="vwapPeriod" value="20" min="1" max="100">
+                    </div>
+                </div>
+            </div>
+
             <div style="margin-top: 20px;">
                 <button class="btn btn-warning" onclick="resetConfig()">Reset to Default</button>
                 <button class="btn btn-success" onclick="saveConfig()">Save Configuration</button>
@@ -738,6 +748,14 @@
                     </div>
                 </div>
 
+                <!-- VMAP -->
+                <div class="indicator-section">
+                    <h4>VWAP</h4>
+                    <div id="vwapData">
+                        <div>Calculating...</div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -793,6 +811,7 @@
             atr_period: 14,
             fibonacci_period: 20,
             fibonacci_levels: [0.236, 0.382, 0.5, 0.618, 0.786],
+            vwap_period: 20,
         };
 
         // Technical indicators data storage
@@ -809,7 +828,8 @@
             roc: {},
             momentum: {},
             atr: {},
-            fibonacci: {}
+            fibonacci: {},
+            vwap: {},
         };
 
         function updateIndicatorsConfig() {
@@ -844,6 +864,7 @@
                     atr_period: parseInt(document.getElementById('atrPeriod')?.value) || 14,
                     fibonacci_period: parseInt(document.getElementById('fibonacciPeriod').value) || 20,
                     fibonacci_levels: fibonacciLevelsStr.split(',').map(l => parseFloat(l.trim())).filter(l => !isNaN(l)),
+                    vwap_period: parseInt(document.getElementById('vwapPeriod').value) || 20,
                 };
                 
                 addLog('📊 Technical indicators configuration updated', 'info');
@@ -898,6 +919,7 @@
                 document.getElementById('atrPeriod').value = '14';
                 document.getElementById('fibonacciPeriod').value = '20';
                 document.getElementById('fibonacciLevels').value = '0.236,0.382,0.5,0.618,0.786';
+                document.getElementById('vwapPeriod').value = '20';
                 
                 addLog('🔄 Configuration reset to defaults', 'info');
             } catch (error) {
@@ -953,7 +975,7 @@
         }
 
         function showIndicatorsUnavailable() {
-            const sections = ['movingAveragesData', 'macdData', 'rsiData', 'adxData', 'psarData', 'ichimokuData', 'supertrendData', 'stochasticData', 'cciData', 'momentumData', 'atrData', 'fibonacciData'];
+            const sections = ['movingAveragesData', 'macdData', 'rsiData', 'adxData', 'psarData', 'ichimokuData', 'supertrendData', 'stochasticData', 'cciData', 'momentumData', 'atrData', 'fibonacciData', 'vwapData'];
             sections.forEach(sectionId => {
                 const element = document.getElementById(sectionId);
                 if (element) {
@@ -1121,7 +1143,8 @@
                         `;
                     }
                 }
-
+                
+                // update ROC
                 if (indicators.roc) {
                     const roc = indicators.roc;
                     const rocElement = document.getElementById('rocData');
@@ -1228,6 +1251,52 @@
                         }
                     
                         fibonacciElement.innerHTML = fibHtml;
+                    }
+                }
+
+                // Update VWAP
+                if (indicators.vwap) {
+                    const vwap = indicators.vwap;
+                    const vwapElement = document.getElementById('vwapData');
+                
+                    if (vwapElement) {
+                        const value = vwap.value || 0;
+                        const signal = vwap.signal || 'N/A';
+                    
+                        // Get current price for comparison
+                        const currentPrice = document.getElementById('price')?.textContent?.replace('₹', '') || 0;
+                        const currentPriceValue = parseFloat(currentPrice);
+                    
+                        let comparisonText = '';
+                        let signalColor = '#333';
+                    
+                        if (currentPriceValue && value) {
+                            const difference = currentPriceValue - value;
+                            const percentDiff = ((difference / value) * 100);
+                            
+                            if (difference > 0) {
+                                comparisonText = `+₹${difference.toFixed(2)} (+${percentDiff.toFixed(2)}%)`;
+                                signalColor = '#27ae60';
+                            } else {
+                                comparisonText = `₹${difference.toFixed(2)} (${percentDiff.toFixed(2)}%)`;
+                                signalColor = '#e74c3c';
+                            }
+                        }
+                    
+                        // Color coding based on signal
+                        let vwapSignalColor = '#333';
+                        if (signal.includes('STRONG_BULLISH')) vwapSignalColor = '#27ae60';
+                        else if (signal.includes('BULLISH') || signal.includes('ABOVE_VWAP')) vwapSignalColor = '#2ecc71';
+                        else if (signal.includes('STRONG_BEARISH')) vwapSignalColor = '#e74c3c';
+                        else if (signal.includes('BEARISH') || signal.includes('BELOW_VWAP')) vwapSignalColor = '#c0392b';
+                        else if (signal.includes('AT_VWAP')) vwapSignalColor = '#f39c12';
+                        else if (signal === 'NEUTRAL') vwapSignalColor = '#95a5a6';
+                    
+                        vwapElement.innerHTML = `
+                            <div><strong>VWAP:</strong> ₹${value.toFixed(2)}</div>
+                            <div><strong>vs Price:</strong> <span style="color: ${signalColor};">${comparisonText}</span></div>
+                            <div><strong>Signal:</strong> <span style="color: ${vwapSignalColor}; font-weight: bold;">${signal.replace(/_/g, ' ')}</span></div>
+                        `;
                     }
                 }
 
