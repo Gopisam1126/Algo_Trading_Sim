@@ -56,6 +56,8 @@ class TechnicalIndicators:
             'fibonacci_period': 20,  # Period to look back for swing high/low
             'fibonacci_levels': [0.236, 0.382, 0.5, 0.618, 0.786],  # Standard Fibonacci levels
             'vwap_period': 20,
+            'pivot_points_type': 'standard',
+
         }
         
         if config:
@@ -99,6 +101,7 @@ class TechnicalIndicators:
         self.atr_values = deque(maxlen=100)
         self.fibonacci_values = deque(maxlen=100)
         self.vwap_values = deque(maxlen=100)
+        self.pivot_points_values = deque(maxlen=100)
         
         # Initialize indicator states
         self.initialize_indicator_states()
@@ -171,6 +174,12 @@ class TechnicalIndicators:
         self.vwap_cumulative_pv = 0  # Price * Volume
         self.vwap_period_volumes = deque(maxlen=self.config['vwap_period'])
         self.vwap_period_pv = deque(maxlen=self.config['vwap_period'])
+
+        # Pivot Points state
+        self.pivot_points_data = None
+        self.previous_day_high = None
+        self.previous_day_low = None
+        self.previous_day_close = None
     
     def add_data_point(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Add a new data point and calculate all indicators"""
@@ -278,6 +287,11 @@ class TechnicalIndicators:
                 'value': vwap,
                 'signal': self.get_vwap_signal(vwap, price)
             }
+
+        # Pivot Points
+        pivot_points_data = self.calculate_pivot_points()
+        if pivot_points_data:
+            indicators['pivot_points'] = pivot_points_data
         
         return indicators
     
@@ -1126,6 +1140,203 @@ class TechnicalIndicators:
                 return "SLIGHTLY_BELOW_VWAP"
         else:
             return "AT_VWAP"
+        
+    def calculate_pivot_points(self) -> Optional[Dict[str, Any]]:
+        """Calculate Pivot Points with multiple calculation methods"""
+        if len(self.highs) < 1 or len(self.lows) < 1 or len(self.prices) < 1:
+            return None
+
+        # Use the most recent complete day's data
+        # For simplicity, we'll use the last available high, low, close
+        # In production, you'd want to use actual previous day's OHLC data
+        high = self.highs[-1]
+        low = self.lows[-1]
+        close = self.prices[-1]
+
+        # Store previous day data
+        self.previous_day_high = high
+        self.previous_day_low = low
+        self.previous_day_close = close
+
+        pivot_type = self.config.get('pivot_points_type', 'standard')
+        current_price = self.prices[-1]
+
+        if pivot_type == 'standard':
+            pivot_data = self.calculate_standard_pivot_points(high, low, close)
+        elif pivot_type == 'fibonacci':
+            pivot_data = self.calculate_fibonacci_pivot_points(high, low, close)
+        elif pivot_type == 'woodie':
+            pivot_data = self.calculate_woodie_pivot_points(high, low, close)
+        elif pivot_type == 'camarilla':
+            pivot_data = self.calculate_camarilla_pivot_points(high, low, close)
+        else:
+            pivot_data = self.calculate_standard_pivot_points(high, low, close)
+
+        # Add signal analysis
+        signal = self.get_pivot_points_signal(current_price, pivot_data)
+        pivot_data['signal'] = signal
+        pivot_data['current_price'] = current_price
+        pivot_data['type'] = pivot_type
+
+        self.pivot_points_values.append(pivot_data)
+        return pivot_data
+
+    def calculate_standard_pivot_points(self, high: float, low: float, close: float) -> Dict[str, float]:
+        """Calculate Standard Pivot Points"""
+        # Pivot Point
+        pp = (high + low + close) / 3
+    
+        # Support levels
+        s1 = (2 * pp) - high
+        s2 = pp - (high - low)
+        s3 = low - 2 * (high - pp)
+    
+        # Resistance levels
+        r1 = (2 * pp) - low
+        r2 = pp + (high - low)
+        r3 = high + 2 * (pp - low)
+    
+        return {
+            'pivot_point': pp,
+            'support_1': s1,
+            'support_2': s2,
+            'support_3': s3,
+            'resistance_1': r1,
+            'resistance_2': r2,
+            'resistance_3': r3
+        }
+    
+    def calculate_fibonacci_pivot_points(self, high: float, low: float, close: float) -> Dict[str, float]:
+        """Calculate Fibonacci Pivot Points"""
+        # Pivot Point
+        pp = (high + low + close) / 3
+        range_val = high - low
+    
+        # Fibonacci levels (38.2%, 61.8%)
+        s1 = pp - (0.382 * range_val)
+        s2 = pp - (0.618 * range_val)
+        s3 = pp - (1.000 * range_val)
+    
+        r1 = pp + (0.382 * range_val)
+        r2 = pp + (0.618 * range_val)
+        r3 = pp + (1.000 * range_val)
+    
+        return {
+            'pivot_point': pp,
+            'support_1': s1,
+            'support_2': s2,
+            'support_3': s3,
+            'resistance_1': r1,
+            'resistance_2': r2,
+            'resistance_3': r3
+        }
+    
+    def calculate_woodie_pivot_points(self, high: float, low: float, close: float) -> Dict[str, float]:
+        """Calculate Woodie's Pivot Points"""
+        # Woodie's Pivot Point (gives more weight to closing price)
+        pp = (high + low + (2 * close)) / 4
+    
+        # Support and Resistance levels
+        s1 = (2 * pp) - high
+        s2 = pp - (high - low)
+        s3 = low - 2 * (high - pp)
+    
+        r1 = (2 * pp) - low
+        r2 = pp + (high - low)
+        r3 = high + 2 * (pp - low)
+    
+        return {
+            'pivot_point': pp,
+            'support_1': s1,
+            'support_2': s2,
+            'support_3': s3,
+            'resistance_1': r1,
+            'resistance_2': r2,
+            'resistance_3': r3
+        }
+    
+    def calculate_camarilla_pivot_points(self, high: float, low: float, close: float) -> Dict[str, float]:
+        """Calculate Camarilla Pivot Points"""
+        # Camarilla Pivot Point
+        pp = close
+        range_val = high - low
+    
+        # Camarilla levels use specific multipliers
+        s1 = close - (range_val * 1.1/12)
+        s2 = close - (range_val * 1.1/6)
+        s3 = close - (range_val * 1.1/4)
+        s4 = close - (range_val * 1.1/2)
+    
+        r1 = close + (range_val * 1.1/12)
+        r2 = close + (range_val * 1.1/6)
+        r3 = close + (range_val * 1.1/4)
+        r4 = close + (range_val * 1.1/2)
+    
+        return {
+            'pivot_point': pp,
+            'support_1': s1,
+            'support_2': s2,
+            'support_3': s3,
+            'support_4': s4,
+            'resistance_1': r1,
+            'resistance_2': r2,
+            'resistance_3': r3,
+            'resistance_4': r4
+        }
+    
+    def get_pivot_points_signal(self, current_price: float, pivot_data: Dict[str, float]) -> str:
+        """Get trading signal based on Pivot Points"""
+        pp = pivot_data['pivot_point']
+        
+        # Get support and resistance levels
+        supports = [pivot_data.get(f'support_{i}') for i in range(1, 5) if pivot_data.get(f'support_{i}') is not None]
+        resistances = [pivot_data.get(f'resistance_{i}') for i in range(1, 5) if pivot_data.get(f'resistance_{i}') is not None]
+        
+        # Remove None values and sort
+        supports = [s for s in supports if s is not None]
+        resistances = [r for r in resistances if r is not None]
+        supports.sort(reverse=True)  # Sort descending (closest support first)
+        resistances.sort()  # Sort ascending (closest resistance first)
+    
+        # Determine position relative to pivot point
+        if current_price > pp:
+            # Price above pivot - bullish bias
+            
+            # Check if near resistance levels
+            for i, resistance in enumerate(resistances):
+                distance_pct = abs(current_price - resistance) / current_price * 100
+                if distance_pct < 0.1:  # Very close to resistance
+                    return f"AT_RESISTANCE_{i+1}"
+                elif distance_pct < 0.5:  # Near resistance
+                    return f"NEAR_RESISTANCE_{i+1}"
+            
+            # Check if breaking through resistance
+            if resistances and current_price > resistances[0]:
+                return "BULLISH_BREAKOUT"
+            
+            return "BULLISH_ABOVE_PIVOT"
+        
+        elif current_price < pp:
+            # Price below pivot - bearish bias
+            
+            # Check if near support levels
+            for i, support in enumerate(supports):
+                distance_pct = abs(current_price - support) / current_price * 100
+                if distance_pct < 0.1:  # Very close to support
+                    return f"AT_SUPPORT_{i+1}"
+                elif distance_pct < 0.5:  # Near support
+                    return f"NEAR_SUPPORT_{i+1}"
+            
+            # Check if breaking through support
+            if supports and current_price < supports[0]:
+                return "BEARISH_BREAKDOWN"
+            
+            return "BEARISH_BELOW_PIVOT"
+        
+        else:
+            # Price at pivot point
+            return "AT_PIVOT_POINT"
+    
 
     def get_all_indicators(self) -> Dict[str, Any]:
         """Get all calculated indicators in a structured format"""
@@ -1205,6 +1416,23 @@ class TechnicalIndicators:
                         list(self.prices)[-1] if self.prices else None
                     ) if self.vwap_values and self.prices else None
                 } if self.vwap_values else None,
+                'pivot_points': {
+                    'pivot_point': list(self.pivot_points_values)[-1]['pivot_point'] if self.pivot_points_values else None,
+                    'support_levels': {
+                        's1': list(self.pivot_points_values)[-1].get('support_1') if self.pivot_points_values else None,
+                        's2': list(self.pivot_points_values)[-1].get('support_2') if self.pivot_points_values else None,
+                        's3': list(self.pivot_points_values)[-1].get('support_3') if self.pivot_points_values else None,
+                        's4': list(self.pivot_points_values)[-1].get('support_4') if self.pivot_points_values else None,
+                    },
+                    'resistance_levels': {
+                        'r1': list(self.pivot_points_values)[-1].get('resistance_1') if self.pivot_points_values else None,
+                        'r2': list(self.pivot_points_values)[-1].get('resistance_2') if self.pivot_points_values else None,
+                        'r3': list(self.pivot_points_values)[-1].get('resistance_3') if self.pivot_points_values else None,
+                        'r4': list(self.pivot_points_values)[-1].get('resistance_4') if self.pivot_points_values else None,
+                    },
+                    'type': list(self.pivot_points_values)[-1].get('type') if self.pivot_points_values else None,
+                    'signal': list(self.pivot_points_values)[-1].get('signal') if self.pivot_points_values else None
+                } if self.pivot_points_values else None,
             },
             'configuration': self.config
         }
@@ -1354,6 +1582,7 @@ async def main():
         'fibonacci_period': 20,
         'fibonacci_levels': [0.236, 0.382, 0.5, 0.618, 0.786],
         'vwap_period': 20,
+        'pivot_points_type': 'standard',
     }
     
     client = TradingDataClient(config=config)

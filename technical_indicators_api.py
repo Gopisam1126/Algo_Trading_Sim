@@ -524,13 +524,107 @@ def get_trading_signals():
                             'Price at institutional average',
                             'Decision point - watch for breakout direction'
                         ])
+        
+        elif indicator_name == 'pivot_points' and isinstance(indicator_data, dict):
+            # Enhanced Pivot Points signal logic with detailed analysis
+            pivot_signal = indicator_data.get('signal', 'NEUTRAL')
+            pivot_type = indicator_data.get('type', 'standard')
+            signals[indicator_name] = pivot_signal
 
-                    # Add VWAP analysis to response (you can modify this based on your needs)
-                    if not volatility_analysis:
-                        volatility_analysis = vwap_analysis
-                    else:
-                        # If volatility_analysis exists, add VWAP data to it
-                        volatility_analysis['vwap_analysis'] = vwap_analysis
+            # Add pivot points analysis to volatility_analysis if it doesn't exist or extend existing one
+            pivot_analysis = {
+                'pivot_type': pivot_type,
+                'pivot_point': indicator_data.get('pivot_point'),
+                'support_levels': indicator_data.get('support_levels', {}),
+                'resistance_levels': indicator_data.get('resistance_levels', {}),
+                'current_price': indicator_data.get('current_price'),
+                'signal': pivot_signal,
+                'interpretation': {
+                    'position_relative_to_pivot': None,
+                    'nearest_level': None,
+                    'trading_implications': []
+                }
+            }
+
+            # Interpret pivot points signals
+            if 'ABOVE_PIVOT' in pivot_signal:
+                pivot_analysis['interpretation']['position_relative_to_pivot'] = 'Price trading above pivot point'
+                if 'BULLISH' in pivot_signal:
+                    pivot_analysis['interpretation']['trading_implications'].extend([
+                        'Bullish bias - price above pivot',
+                        'Look for long opportunities',
+                        'Resistance levels become targets'
+                    ])
+            elif 'BELOW_PIVOT' in pivot_signal:
+                pivot_analysis['interpretation']['position_relative_to_pivot'] = 'Price trading below pivot point'
+                if 'BEARISH' in pivot_signal:
+                    pivot_analysis['interpretation']['trading_implications'].extend([
+                        'Bearish bias - price below pivot',
+                        'Look for short opportunities',
+                        'Support levels become targets'
+                    ])
+            elif 'AT_PIVOT_POINT' in pivot_signal:
+                pivot_analysis['interpretation']['position_relative_to_pivot'] = 'Price at pivot point'
+                pivot_analysis['interpretation']['trading_implications'].extend([
+                    'Decision point - watch for direction',
+                    'Potential reversal or continuation zone'
+                ])
+
+            # Handle support and resistance level signals
+            if 'AT_SUPPORT' in pivot_signal:
+                level_match = [part for part in pivot_signal.split('_') if part.isdigit()]
+                level_num = level_match[0] if level_match else '1'
+                pivot_analysis['interpretation']['nearest_level'] = f'At Support Level {level_num}'
+                pivot_analysis['interpretation']['trading_implications'].extend([
+                    f'Price testing S{level_num} support',
+                    'Potential bounce zone',
+                    'Watch for reversal signals'
+                ])
+            elif 'NEAR_SUPPORT' in pivot_signal:
+                level_match = [part for part in pivot_signal.split('_') if part.isdigit()]
+                level_num = level_match[0] if level_match else '1'
+                pivot_analysis['interpretation']['nearest_level'] = f'Near Support Level {level_num}'
+                pivot_analysis['interpretation']['trading_implications'].extend([
+                    f'Approaching S{level_num} support',
+                    'Prepare for potential support test'
+                ])
+            elif 'AT_RESISTANCE' in pivot_signal:
+                level_match = [part for part in pivot_signal.split('_') if part.isdigit()]
+                level_num = level_match[0] if level_match else '1'
+                pivot_analysis['interpretation']['nearest_level'] = f'At Resistance Level {level_num}'
+                pivot_analysis['interpretation']['trading_implications'].extend([
+                    f'Price testing R{level_num} resistance',
+                    'Potential rejection zone',
+                    'Watch for reversal signals'
+                ])
+            elif 'NEAR_RESISTANCE' in pivot_signal:
+                level_match = [part for part in pivot_signal.split('_') if part.isdigit()]
+                level_num = level_match[0] if level_match else '1'
+                pivot_analysis['interpretation']['nearest_level'] = f'Near Resistance Level {level_num}'
+                pivot_analysis['interpretation']['trading_implications'].extend([
+                    f'Approaching R{level_num} resistance',
+                    'Prepare for potential resistance test'
+                ])
+            elif 'BULLISH_BREAKOUT' in pivot_signal:
+                pivot_analysis['interpretation']['nearest_level'] = 'Breaking above resistance'
+                pivot_analysis['interpretation']['trading_implications'].extend([
+                    'Bullish breakout in progress',
+                    'Higher levels likely targets',
+                    'Momentum continuation expected'
+                ])
+            elif 'BEARISH_BREAKDOWN' in pivot_signal:
+                pivot_analysis['interpretation']['nearest_level'] = 'Breaking below support'
+                pivot_analysis['interpretation']['trading_implications'].extend([
+                    'Bearish breakdown in progress',
+                    'Lower levels likely targets',
+                    'Downward momentum expected'
+                ])
+            # Add VWAP analysis to response (you can modify this based on your needs)
+            if not volatility_analysis:
+                volatility_analysis = vwap_analysis
+            else:
+                # If volatility_analysis exists, add VWAP data to it
+                volatility_analysis['vwap_analysis'] = vwap_analysis
 
     # Prepare response data
     response_data = {
@@ -558,12 +652,24 @@ def get_trading_signals():
             'above_vwap_signals': len([s for s in signals.values() if 'ABOVE_VWAP' in s]),
             'below_vwap_signals': len([s for s in signals.values() if 'BELOW_VWAP' in s]),
             'at_vwap_signals': len([s for s in signals.values() if 'AT_VWAP' in s]),
+            'pivot_bullish_signals': len([s for s in signals.values() if 'BULLISH' in s and ('PIVOT' in s or 'BREAKOUT' in s)]),
+            'pivot_bearish_signals': len([s for s in signals.values() if 'BEARISH' in s and ('PIVOT' in s or 'BREAKDOWN' in s)]),
+            'at_support_signals': len([s for s in signals.values() if 'AT_SUPPORT' in s]),
+            'at_resistance_signals': len([s for s in signals.values() if 'AT_RESISTANCE' in s]),
+            'near_support_signals': len([s for s in signals.values() if 'NEAR_SUPPORT' in s]),
+            'near_resistance_signals': len([s for s in signals.values() if 'NEAR_RESISTANCE' in s]),
+            'breakout_signals': len([s for s in signals.values() if 'BREAKOUT' in s]),
+            'breakdown_signals': len([s for s in signals.values() if 'BREAKDOWN' in s]),
+            'at_pivot_signals': len([s for s in signals.values() if 'AT_PIVOT_POINT' in s]),
+
         }
     }
 
     # Add volatility analysis if available
     if volatility_analysis:
         response_data['analysis'] = volatility_analysis
+    elif 'pivot_analysis' not in volatility_analysis:
+        volatility_analysis['pivot_analysis'] = pivot_analysis
 
     return jsonify(response_data)
 
@@ -604,6 +710,7 @@ if __name__ == '__main__':
         'fibonacci_period': 20,
         'fibonacci_levels': [0.236, 0.382, 0.5, 0.618, 0.786],
         'vwap_period': 20,
+        'pivot_points_type': 'standard',
     }
     
     try:

@@ -586,6 +586,22 @@
                 </div>
             </div>
 
+            <div class="config-section">
+                <h3>Pivot Points</h3>
+                <div class="config-grid">
+                    <div class="config-item">
+                        <label for="pivotPointsType">Pivot Points Type:</label>
+                        <select id="pivotPointsType">
+                            <option value="standard">Standard</option>
+                            <option value="fibonacci">Fibonacci</option>
+                            <option value="camarilla">Camarilla</option>
+                            <option value="woodie">Woodie</option>
+                            <option value="demark">DeMark</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
             <div style="margin-top: 20px;">
                 <button class="btn btn-warning" onclick="resetConfig()">Reset to Default</button>
                 <button class="btn btn-success" onclick="saveConfig()">Save Configuration</button>
@@ -756,6 +772,14 @@
                     </div>
                 </div>
 
+                <!-- Pivot Points -->
+                <div class="indicator-section">
+                    <h4>Pivot Points</h4>
+                    <div id="pivotPointsData">
+                        <div>Calculating...</div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -812,6 +836,7 @@
             fibonacci_period: 20,
             fibonacci_levels: [0.236, 0.382, 0.5, 0.618, 0.786],
             vwap_period: 20,
+            
         };
 
         // Technical indicators data storage
@@ -830,6 +855,7 @@
             atr: {},
             fibonacci: {},
             vwap: {},
+            pivot_points: {},
         };
 
         function updateIndicatorsConfig() {
@@ -865,6 +891,7 @@
                     fibonacci_period: parseInt(document.getElementById('fibonacciPeriod').value) || 20,
                     fibonacci_levels: fibonacciLevelsStr.split(',').map(l => parseFloat(l.trim())).filter(l => !isNaN(l)),
                     vwap_period: parseInt(document.getElementById('vwapPeriod').value) || 20,
+                    pivot_points_type: document.getElementById('pivotPointsType')?.value || 'standard',
                 };
                 
                 addLog('📊 Technical indicators configuration updated', 'info');
@@ -920,6 +947,7 @@
                 document.getElementById('fibonacciPeriod').value = '20';
                 document.getElementById('fibonacciLevels').value = '0.236,0.382,0.5,0.618,0.786';
                 document.getElementById('vwapPeriod').value = '20';
+                document.getElementById('pivotPointsType').value = 'standard';
                 
                 addLog('🔄 Configuration reset to defaults', 'info');
             } catch (error) {
@@ -975,7 +1003,7 @@
         }
 
         function showIndicatorsUnavailable() {
-            const sections = ['movingAveragesData', 'macdData', 'rsiData', 'adxData', 'psarData', 'ichimokuData', 'supertrendData', 'stochasticData', 'cciData', 'momentumData', 'atrData', 'fibonacciData', 'vwapData'];
+            const sections = ['movingAveragesData', 'macdData', 'rsiData', 'adxData', 'psarData', 'ichimokuData', 'supertrendData', 'stochasticData', 'cciData', 'momentumData', 'atrData', 'fibonacciData', 'vwapData', 'pivotPointsData'];
             sections.forEach(sectionId => {
                 const element = document.getElementById(sectionId);
                 if (element) {
@@ -1273,7 +1301,7 @@
                         if (currentPriceValue && value) {
                             const difference = currentPriceValue - value;
                             const percentDiff = ((difference / value) * 100);
-                            
+
                             if (difference > 0) {
                                 comparisonText = `+₹${difference.toFixed(2)} (+${percentDiff.toFixed(2)}%)`;
                                 signalColor = '#27ae60';
@@ -1300,11 +1328,63 @@
                     }
                 }
 
+                if (indicators.pivot_points) {
+                    const pivotPoints = indicators.pivot_points;
+                    const pivotPointsElement = document.getElementById('pivotPointsData');
+                    if (pivotPointsElement) {
+                        let pivotHtml = `
+                            <div><strong>Pivot Point:</strong> ₹${pivotPoints.pivot_point?.toFixed(2) || 'N/A'}</div>
+                            <div><strong>Type:</strong> ${pivotPoints.type || 'Standard'}</div>
+                            <div><strong>Signal:</strong> <span style="color: ${getPivotSignalColor(pivotPoints.signal)}; font-weight: bold;">${pivotPoints.signal?.replace(/_/g, ' ') || 'N/A'}</span></div>
+                        `;
+
+                        // Add resistance levels
+                        if (pivotPoints.resistance_levels) {
+                            pivotHtml += '<div style="margin-top: 8px; font-size: 0.9em;"><strong>Resistance:</strong></div>';
+                            for (let i = 1; i <= 3; i++) {
+                                const rLevel = pivotPoints.resistance_levels[`r${i}`];
+                                if (rLevel !== null && rLevel !== undefined) {
+                                    pivotHtml += `<div style="font-size: 0.85em; color: #e74c3c;">• R${i}: ₹${rLevel.toFixed(2)}</div>`;
+                                }
+                            }
+                        }
+
+                        // Add support levels
+                        if (pivotPoints.support_levels) {
+                            pivotHtml += '<div style="margin-top: 8px; font-size: 0.9em;"><strong>Support:</strong></div>';
+                            for (let i = 1; i <= 3; i++) {
+                                const sLevel = pivotPoints.support_levels[`s${i}`];
+                                if (sLevel !== null && sLevel !== undefined) {
+                                    pivotHtml += `<div style="font-size: 0.85em; color: #27ae60;">• S${i}: ₹${sLevel.toFixed(2)}</div>`;
+                                }
+                            }
+                        }
+
+                        pivotPointsElement.innerHTML = pivotHtml;
+                    }
+                }
+
+
             } catch (error) {
                 console.error('Error updating indicators display:', error);
                 addLog('❌ Error updating indicators display: ' + error.message, 'error');
             }
         }
+
+        function getPivotSignalColor(signal) {
+            if (!signal) return '#333';
+            
+            if (signal.includes('BULLISH_BREAKOUT') || signal.includes('STRONG_BULLISH')) return '#27ae60';
+            else if (signal.includes('BULLISH') || signal.includes('ABOVE_PIVOT')) return '#2ecc71';
+            else if (signal.includes('BEARISH_BREAKDOWN') || signal.includes('STRONG_BEARISH')) return '#e74c3c';
+            else if (signal.includes('BEARISH') || signal.includes('BELOW_PIVOT')) return '#c0392b';
+            else if (signal.includes('AT_SUPPORT')) return '#f39c12';
+            else if (signal.includes('AT_RESISTANCE')) return '#e67e22';
+            else if (signal.includes('AT_PIVOT_POINT')) return '#9b59b6';
+            else if (signal.includes('NEAR_SUPPORT') || signal.includes('NEAR_RESISTANCE')) return '#95a5a6';
+            else return '#333';
+        }
+
 
         // WebSocket connection functions
         function connectWebSocket() {
