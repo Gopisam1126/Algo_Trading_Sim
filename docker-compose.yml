@@ -10,6 +10,8 @@ services:
       - "8080:8080"
     environment:
       - GIN_MODE=release
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Optional: Mount CSV file for easy updates without rebuilding
       - ./infy_2min_60days.csv:/app/infy_2min_60days.csv:ro

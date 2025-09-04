@@ -11,10 +11,12 @@ import websockets
 import json
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from technical_indicators import TechnicalIndicators, TradingDataClient
 from typing import Dict, Any
+from threading import Lock
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +31,127 @@ current_price_data = {}
 websocket_client = None
 client_thread = None
 running = False
+
+class AIDataBatcher:
+    """
+    Simple batching for 10-minute intervals and sending to AI endpoint
+    """
+    
+    def __init__(self, ai_endpoint="http://localhost:11434/api/chat"):
+        self.ai_endpoint = ai_endpoint
+        self.batch_duration = 600  # 10 minutes in seconds
+        self.max_data_points = 1200  # Expected data points per 10-minute batch (500ms intervals)
+        
+        # Current batch storage
+        self.current_batch = []
+        self.current_batch_start_time = None
+        self.batch_lock = Lock()
+
+        self.ai_response_lock = Lock()
+        self.latest_ai_response = None
+        self.ai_response_history = []
+        self.max_history_length = 50
+        self.batch_count = 0
+        self.last_batch_sent_time = None
+        self.ai_communication_status = "waiting"
+        
+        logger.info(f"AIDataBatcher initialized: collecting data for 10-minute batches")
+    
+    def add_data_point(self, timestamp, price_data, indicators):
+        """
+        Add a new data point to the current batch
+        """
+        with self.batch_lock:
+            current_time = datetime.now()
+            
+            # Initialize batch if needed
+            if self.current_batch_start_time is None:
+                self.current_batch_start_time = current_time
+            
+            # Create data point
+            data_point = {
+                'timestamp': timestamp,
+                'price_data': price_data,
+                'technical_indicators': indicators
+            }
+            
+            self.current_batch.append(data_point)
+            
+            # Check if batch is complete (10 minutes elapsed)
+            if current_time >= self.current_batch_start_time + timedelta(seconds=self.batch_duration):
+                self._send_batch_to_ai()
+    
+    def _send_batch_to_ai(self):
+        """
+        Send the completed 10-minute batch to AI endpoint and store response
+        """
+        if not self.current_batch:
+            return
+
+        try:
+            self.ai_communication_status = "sending"
+
+            # Prepare prompt for Ollama
+            ollama_payload = {
+                "model": "gemma3",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"Analyze this 10-minute trading data batch with {len(self.current_batch)} data points. Provide insights on market trends, volatility, and trading signals: {json.dumps(self.current_batch)}"
+                    }
+                ],
+                "stream": False
+            }
+
+            response = requests.post(
+                self.ai_endpoint,
+                json=ollama_payload,
+                headers={'Content-Type': 'application/json'},
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                ai_response = response.json()
+                ai_analysis = ai_response.get('message', {}).get('content', 'No analysis received')
+
+                # Store AI response
+                with self.ai_response_lock:
+                    response_data = {
+                        'timestamp': datetime.now().isoformat(),
+                        'batch_number': self.batch_count + 1,
+                        'data_points_analyzed': len(self.current_batch),
+                        'ai_analysis': ai_analysis,
+                        'batch_start_time': self.current_batch_start_time.isoformat(),
+                        'batch_end_time': datetime.now().isoformat()
+                    }
+
+                    self.latest_ai_response = response_data
+                    self.ai_response_history.append(response_data)
+
+                    # Keep only last N responses
+                    if len(self.ai_response_history) > self.max_history_length:
+                        self.ai_response_history.pop(0)
+
+                self.ai_communication_status = "success"
+                self.last_batch_sent_time = datetime.now()
+                self.batch_count += 1
+
+                logger.info(f"AI analysis received for batch {self.batch_count}")
+
+            else:
+                self.ai_communication_status = "error"
+                logger.error(f"AI endpoint returned status {response.status_code}: {response.text}")
+
+        except Exception as e:
+            self.ai_communication_status = "error"
+            logger.error(f"Failed to send batch to AI: {e}")
+
+        # Reset for next batch
+        self.current_batch = []
+        self.current_batch_start_time = datetime.now()
+
+# Global AI batcher instance
+ai_batcher = AIDataBatcher()
 
 class WebSocketThread(threading.Thread):
     """Thread to run WebSocket client in background"""
@@ -57,6 +180,13 @@ class WebSocketThread(threading.Thread):
                     current_price_data = data
                     current_indicators = data.get('technical_indicators', {})
                     logger.info(f"Updated global indicators data: {len(current_indicators)} indicators available")
+
+                    # Add to AI batcher
+                    ai_batcher.add_data_point(
+                        timestamp=data.get('timestamp', datetime.now().isoformat()),
+                        price_data=data.get('price_data', {}),
+                        indicators=current_indicators
+                    )
                 
                 self.client.send_to_api = custom_send_to_api
                 
@@ -672,6 +802,52 @@ def get_trading_signals():
         volatility_analysis['pivot_analysis'] = pivot_analysis
 
     return jsonify(response_data)
+
+@app.route('/api/ai/latest-analysis', methods=['GET'])
+def get_latest_ai_analysis():
+    """Get the latest AI analysis"""
+    global ai_batcher
+    
+    with ai_batcher.ai_response_lock:
+        if ai_batcher.latest_ai_response:
+            return jsonify(ai_batcher.latest_ai_response)
+        else:
+            return jsonify({
+                'error': 'No AI analysis available',
+                'message': 'No batches have been processed yet'
+            }), 404
+
+@app.route('/api/ai/analysis-history', methods=['GET'])
+def get_ai_analysis_history():
+    """Get AI analysis history"""
+    global ai_batcher
+    
+    limit = request.args.get('limit', 5, type=int)
+    
+    with ai_batcher.ai_response_lock:
+        history = ai_batcher.ai_response_history[-limit:] if ai_batcher.ai_response_history else []
+        
+        return jsonify({
+            'total_analyses': len(ai_batcher.ai_response_history),
+            'returned_count': len(history),
+            'analyses': history
+        })
+
+@app.route('/api/ai/status', methods=['GET'])
+def get_ai_status():
+    """Get AI communication status"""
+    global ai_batcher
+    
+    return jsonify({
+        'ai_endpoint': ai_batcher.ai_endpoint,
+        'communication_status': ai_batcher.ai_communication_status,
+        'batch_count': ai_batcher.batch_count,
+        'last_batch_sent': ai_batcher.last_batch_sent_time.isoformat() if ai_batcher.last_batch_sent_time else None,
+        'current_batch_size': len(ai_batcher.current_batch),
+        'batch_start_time': ai_batcher.current_batch_start_time.isoformat() if ai_batcher.current_batch_start_time else None,
+        'has_latest_analysis': ai_batcher.latest_ai_response is not None,
+        'history_count': len(ai_batcher.ai_response_history)
+    })
 
 @app.route('/health', methods=['GET'])
 def health_check():

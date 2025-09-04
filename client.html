@@ -364,6 +364,99 @@
             font-size: 1.1em;
         }
 
+        .ai-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .ai-analysis {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
+        .ai-analysis-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 10px;
+        }
+
+        .ai-analysis-header h3 {
+            color: #2c3e50;
+            margin: 0;
+        }
+
+        .ai-meta {
+            font-size: 0.9em;
+            color: #7f8c8d;
+            text-align: right;
+        }
+
+        .ai-response {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+            white-space: pre-wrap;
+            line-height: 1.6;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        .ai-status {
+            text-align: center;
+            padding: 20px;
+            color: #7f8c8d;
+            font-style: italic;
+        }
+
+        .ai-history {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .ai-history-item {
+            background: white;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            border-left: 4px solid #9b59b6;
+        }
+
+        .ai-history-meta {
+            font-size: 0.85em;
+            color: #7f8c8d;
+            margin-bottom: 8px;
+        }
+
+        .ai-history-content {
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+
+        .ai-error {
+            background: #fee;
+            color: #c0392b;
+            padding: 10px;
+            border-radius: 5px;
+            border-left: 4px solid #e74c3c;
+        }
+
+        .ai-loading {
+            text-align: center;
+            padding: 20px;
+            color: #3498db;
+            font-style: italic;
+        }
+
         @keyframes pulse {
             0% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -799,6 +892,36 @@
             </div>
             <div class="logs" id="logs"></div>
         </div>
+
+        <!-- AI Analysis Display -->
+        <div class="card" style="margin-bottom: 20px;">
+            <h2>🤖 AI Market Analysis</h2>
+            <div class="ai-controls" style="margin-bottom: 15px;">
+                <button class="btn btn-info" onclick="fetchLatestAIAnalysis()">🔄 Refresh AI Analysis</button>
+                <button class="btn btn-warning" onclick="fetchAIAnalysisHistory()">📚 View History</button>
+                <button class="btn btn-primary" onclick="checkAIStatus()">📊 AI Status</button>
+            </div>
+
+            <div id="aiAnalysisContainer">
+                <div class="ai-status" id="aiStatus">
+                    <div>Click "Refresh AI Analysis" to load latest market insights</div>
+                </div>
+
+                <div class="ai-analysis" id="aiAnalysisContent" style="display: none;">
+                    <div class="ai-analysis-header">
+                        <h3>Latest Analysis</h3>
+                        <div class="ai-meta" id="aiMetadata"></div>
+                    </div>
+                    <div class="ai-response" id="aiResponseText"></div>
+                </div>
+
+                <div class="ai-history" id="aiHistoryContainer" style="display: none;">
+                    <h3>Analysis History</h3>
+                    <div id="aiHistoryContent"></div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <script>
@@ -1521,6 +1644,120 @@
             }
         }
 
+        // AI Analysis Functions
+        function fetchLatestAIAnalysis() {
+            const aiStatus = document.getElementById('aiStatus');
+            const aiAnalysisContent = document.getElementById('aiAnalysisContent');
+
+            // Show loading state
+            aiStatus.innerHTML = '<div class="ai-loading">Loading latest AI analysis...</div>';
+            aiAnalysisContent.style.display = 'none';
+
+            fetch('/api/ai/latest-analysis')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    displayAIAnalysis(data);
+                    addLog('🤖 AI analysis fetched successfully', 'success');
+                })
+                .catch(error => {
+                    aiStatus.innerHTML = `<div class="ai-error">Error loading AI analysis: ${error.message}</div>`;
+                    addLog(`❌ Error fetching AI analysis: ${error.message}`, 'error');
+                });
+        }
+
+        function fetchAIAnalysisHistory() {
+            const aiHistoryContainer = document.getElementById('aiHistoryContainer');
+            const aiHistoryContent = document.getElementById('aiHistoryContent');
+
+            // Show loading
+            aiHistoryContent.innerHTML = '<div class="ai-loading">Loading analysis history...</div>';
+            aiHistoryContainer.style.display = 'block';
+
+            fetch('/api/ai/analysis-history?limit=5')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    displayAIHistory(data.analyses);
+                    addLog(`📚 Loaded ${data.analyses.length} AI analysis records`, 'success');
+                })
+                .catch(error => {
+                    aiHistoryContent.innerHTML = `<div class="ai-error">Error loading history: ${error.message}</div>`;
+                    addLog(`❌ Error fetching AI history: ${error.message}`, 'error');
+                });
+        }
+
+        function checkAIStatus() {
+            fetch('/api/ai/status')
+                .then(response => response.json())
+                .then(data => {
+                    const statusMessage = `
+        AI Status: ${data.communication_status}
+        Batches Sent: ${data.batch_count}
+        Current Batch Size: ${data.current_batch_size}
+        Last Batch: ${data.last_batch_sent ? new Date(data.last_batch_sent).toLocaleString() : 'None'}
+        Has Analysis: ${data.has_latest_analysis ? 'Yes' : 'No'}
+                    `;
+                    alert(statusMessage);
+                    addLog('📊 AI status checked', 'info');
+                })
+                .catch(error => {
+                    addLog(`❌ Error checking AI status: ${error.message}`, 'error');
+                });
+        }
+
+        function displayAIAnalysis(analysisData) {
+            const aiStatus = document.getElementById('aiStatus');
+            const aiAnalysisContent = document.getElementById('aiAnalysisContent');
+            const aiMetadata = document.getElementById('aiMetadata');
+            const aiResponseText = document.getElementById('aiResponseText');
+
+            // Hide status, show analysis
+            aiStatus.style.display = 'none';
+            aiAnalysisContent.style.display = 'block';
+
+            // Update metadata
+            aiMetadata.innerHTML = `
+                <div>Batch #${analysisData.batch_number}</div>
+                <div>${analysisData.data_points_analyzed} data points</div>
+                <div>${new Date(analysisData.timestamp).toLocaleString()}</div>
+            `;
+
+            // Update analysis content
+            aiResponseText.textContent = analysisData.ai_analysis;
+        }
+
+        function displayAIHistory(historyData) {
+            const aiHistoryContent = document.getElementById('aiHistoryContent');
+
+            if (!historyData || historyData.length === 0) {
+                aiHistoryContent.innerHTML = '<div class="ai-error">No analysis history available</div>';
+                return;
+            }
+
+            let historyHtml = '';
+            historyData.reverse().forEach(analysis => {
+                historyHtml += `
+                    <div class="ai-history-item">
+                        <div class="ai-history-meta">
+                            Batch #${analysis.batch_number} | ${analysis.data_points_analyzed} data points | ${new Date(analysis.timestamp).toLocaleString()}
+                        </div>
+                        <div class="ai-history-content">${analysis.ai_analysis}</div>
+                    </div>
+                `;
+            });
+
+            aiHistoryContent.innerHTML = historyHtml;
+        }
+
         function updatePriceHistory(price) {
             try {
                 priceHistory.push({
@@ -1671,7 +1908,12 @@
                     if (ws && ws.readyState === WebSocket.OPEN) {
                         fetchTechnicalIndicators();
                     }
-                }, 10000); // Fetch every 10 seconds to reduce API load
+                }, 10000);
+
+
+                setInterval(() => {
+                    fetchLatestAIAnalysis();
+                }, 300000);
                 
             } catch (error) {
                 addLog(`❌ Error initializing app: ${error.message}`, 'error');
