@@ -1,0 +1,63 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Python files (not needed for Go build)
+*.pyc
+__pycache__/
+script.py
+test_client.py
+
+# Docker files (not needed inside container)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Output directories
+output/
+dist/
+build/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# IDE files
+*.iml
+.vscode/
+.idea/
+
+# Test files
+*_test.go
+test_client.py
+
+# Documentation
+docs/
+*.pdf
+*.doc
+*.docx 
