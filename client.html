@@ -1653,7 +1653,7 @@
             aiStatus.innerHTML = '<div class="ai-loading">Loading latest AI analysis...</div>';
             aiAnalysisContent.style.display = 'none';
 
-            fetch('/api/ai/latest-analysis')
+            fetch('http://localhost:5000/api/ai/latest-analysis')
                 .then(response => {
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
@@ -1678,7 +1678,7 @@
             aiHistoryContent.innerHTML = '<div class="ai-loading">Loading analysis history...</div>';
             aiHistoryContainer.style.display = 'block';
 
-            fetch('/api/ai/analysis-history?limit=5')
+            fetch('http://localhost:5000/api/ai/analysis-history?limit=5')
                 .then(response => {
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
@@ -1696,7 +1696,7 @@
         }
 
         function checkAIStatus() {
-            fetch('/api/ai/status')
+            fetch('http://localhost:5000/api/ai/status')
                 .then(response => response.json())
                 .then(data => {
                     const statusMessage = `

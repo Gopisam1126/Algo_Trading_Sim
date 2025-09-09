@@ -853,7 +853,7 @@ def get_ai_status():
             'has_latest_analysis': has_latest_analysis,
             'history_count': history_count,
             'batch_duration_seconds': ai_batcher.batch_duration,
-            'model': 'gpt-4o',  # Fixed: Match the actual model being used
+            'model': 'gpt-4',
             'max_data_points_per_batch': ai_batcher.max_data_points,
             'max_history_length': ai_batcher.max_history_length
         }
