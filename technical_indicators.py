@@ -5,6 +5,7 @@ All indicators are configurable and support both real-time and historical calcul
 """
 
 import asyncio
+import math
 import websockets
 import json
 import pandas as pd
@@ -387,108 +388,56 @@ class TechnicalIndicators:
                 }
 
         return None
-    
-    """
-        TODO -> The current implementation has the following issues:
-        1. Missing/NaN prices - self.prices containing NaN or non-finite values will break math.
-        2. Pricision/Numeric stability - Repeated floating updates can accumulate tiny rounding errors (rare in practice).
-        3. Sampling frequency mismatch
-        4. Deque maxlen behavior
-
-        Proposed Fix : 
-
-        def calculate_rsi(self) -> Optional[float]:
-
-            if len(self.prices) < 2:
-                return None
-
-            last_price = self.prices[-1]
-            prev_price = self.prices[-2]
-
-            # Safeguard 1: skip if bad tick (NaN, inf, or non-finite)
-            if not (math.isfinite(last_price) and math.isfinite(prev_price)):
-                return None
-
-            # Calculate price change
-            price_change = last_price - prev_price
-
-            # Separate gains and losses
-            gain = max(price_change, 0.0)
-            loss = abs(min(price_change, 0.0))
-
-            self.rsi_gains.append(gain)
-            self.rsi_losses.append(loss)
-
-            rsi_period = self.config['rsi_period']
-
-            if len(self.rsi_gains) < rsi_period:
-                return None
-
-            # Safeguard 2: Initial or resync every 1000 updates
-            if self.avg_gain is None or self.avg_loss is None or self.update_counter % 1000 == 0:
-                self.avg_gain = sum(self.rsi_gains) / rsi_period
-                self.avg_loss = sum(self.rsi_losses) / rsi_period
-            else:
-                # Wilder's smoothing
-                self.avg_gain = ((self.avg_gain * (rsi_period - 1)) + gain) / rsi_period
-                self.avg_loss = ((self.avg_loss * (rsi_period - 1)) + loss) / rsi_period
-
-            # Calculate RSI
-            if self.avg_loss == 0:
-                rsi = 100.0
-            else:
-                rs = self.avg_gain / self.avg_loss
-                rsi = 100 - (100 / (1 + rs))
-
-            self.rsi_values.append(rsi)
-
-            # Maintain bounded deque size (safety in case config mismatch)
-            if len(self.rsi_values) > 100:
-                self.rsi_values.popleft()
-
-            # Increment update counter (needed for drift resync)
-            self.update_counter = getattr(self, "update_counter", 0) + 1
-
-            return rsi
-
-    """
 
     def calculate_rsi(self) -> Optional[float]:
-        """Calculate RSI indicator"""
         if len(self.prices) < 2:
             return None
         
-        # Calculate price change
-        price_change = self.prices[-1] - self.prices[-2]
-        
-        # Separate gains and losses
-        gain = max(price_change, 0)
-        loss = abs(min(price_change, 0))
-        
-        self.rsi_gains.append(gain)
-        self.rsi_losses.append(loss)
-        
-        if len(self.rsi_gains) < self.config['rsi_period']:
+        last_price = self.prices[-1]
+        prev_price = self.prices[-2]
+
+        # Safeguard 1: skip if bad tick (NaN, inf, or non-finite)
+        if not (math.isfinite(last_price) and math.isfinite(prev_price)):
             return None
         
-        # Calculate RSI
-        if self.avg_gain is None or self.avg_loss is None:
-            # First RSI calculation
-            self.avg_gain = sum(self.rsi_gains) / self.config['rsi_period']
-            self.avg_loss = sum(self.rsi_losses) / self.config['rsi_period']
-        else:
-            # Subsequent RSI calculations (Wilder's method)
-            self.avg_gain = ((self.avg_gain * (self.config['rsi_period'] - 1)) + gain) / self.config['rsi_period']
-            self.avg_loss = ((self.avg_loss * (self.config['rsi_period'] - 1)) + loss) / self.config['rsi_period']
+        # Calculate price change
+        price_change = last_price - prev_price
+
+        # Separate gains and losses
+        gain = max(price_change, 0.0)
+        loss = abs(min(price_change, 0.0))
+
+        self.rsi_gains.append(gain)
+        self.rsi_losses.append(loss)
+
+        rsi_period = self.config['rsi_period']
+        if len(self.rsi_gains) < rsi_period:
+            return None
         
+        # Safeguard 2: Initial or resync every 1000 updates
+        if self.avg_gain is None or self.avg_loss is None or self.update_counter % 1000 == 0:
+            self.avg_gain = sum(self.rsi_gains) / rsi_period
+            self.avg_loss = sum(self.rsi_losses) / rsi_period
+        else:
+            # Wilder's smoothing
+            self.avg_gain = ((self.avg_gain * (rsi_period - 1)) + gain) / rsi_period
+            self.avg_loss = ((self.avg_loss * (rsi_period - 1)) + loss) / rsi_period
+
         # Calculate RSI
         if self.avg_loss == 0:
-            rsi = 100
+            rsi = 100.0
         else:
             rs = self.avg_gain / self.avg_loss
             rsi = 100 - (100 / (1 + rs))
-        
+
         self.rsi_values.append(rsi)
+
+        # Maintain bounded deque size (safety in case config mismatch)
+        if len(self.rsi_values) > 100:
+            self.rsi_values.popleft()
+            
+        # Increment update counter (needed for drift resync)
+        self.update_counter = getattr(self, "update_counter", 0) + 1
         return rsi
     
     def get_rsi_signal(self, rsi: float) -> str:
