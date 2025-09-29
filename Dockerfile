@@ -1,0 +1,71 @@
+# Build stage for Go application
+FROM golang:1.21-alpine AS go-builder
+
+# Install git and ca-certificates (needed for go mod download)
+RUN apk add --no-cache git ca-certificates
+
+# Set working directory
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o trading-api main.go
+
+# Final stage
+FROM python:3.11-alpine
+
+# Install ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates
+
+# Create non-root user
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+# Set working directory
+WORKDIR /app
+
+# Copy the binary from go-builder stage
+COPY --from=go-builder /app/trading-api .
+
+# Copy Python requirements and install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the CSV data file
+COPY infy_2min_60days.csv .
+
+# Copy the HTML client
+COPY client.html .
+
+# Copy the RSI client
+COPY test_RSI.py .
+
+# Copy the MACD client
+COPY test_MACD.py .
+
+# Copy the WebSocket test file
+COPY test_websocket.html .
+
+# Change ownership to non-root user
+RUN chown -R appuser:appgroup /app
+
+# Switch to non-root user
+USER appuser
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+
+# Run the application
+CMD ["./trading-api"]
