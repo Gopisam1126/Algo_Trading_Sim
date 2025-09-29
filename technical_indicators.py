@@ -670,53 +670,149 @@ class TechnicalIndicators:
         
         return None
     
+    def calculate_atr(self) -> Optional[float]:
+        """Calculate Average True Range (ATR) indicator"""
+        if len(self.highs) < 2 or len(self.lows) < 2 or len(self.prices) < 2:
+            return None
+        
+        # Calculate True Range for current period
+        high = self.highs[-1]
+        low = self.lows[-1]
+        prev_close = self.prices[-2]
+        tr = max(
+            high - low,
+            abs(high - prev_close),
+            abs(low - prev_close)
+        )
+
+        # Store TR value
+        self.atr_tr_values.append(tr)
+
+        # Need at least the ATR period number of TR values
+        if len(self.atr_tr_values) < self.config['atr_period']:
+            return None
+        # Calculate ATR as Simple Moving Average of True Range values
+        if self.atr is None:
+            # First ATR calculation - use simple average
+            self.atr = sum(self.atr_tr_values) / len(self.atr_tr_values)
+        else:
+            # Subsequent ATR calculations using Wilder's method (exponential smoothing)
+            # ATR = (Previous ATR * (n-1) + Current TR) / n
+            self.atr = ((self.atr * (self.config['atr_period'] - 1)) + tr) / self.config['atr_period']
+        self.atr_values.append(self.atr)
+        
+        return self.atr
+        
+    # Updation to handle the advanced ATR Signal
+    def get_atr_signal(self, atr: float) -> str:
+        """Get trading signal based on ATR value"""
+        if len(self.atr_values) < 2:
+            return "NEUTRAL"
+
+        # Compare current ATR with previous ATR to determine volatility trend
+        prev_atr = list(self.atr_values)[-2]
+        atr_change = ((atr - prev_atr) / prev_atr) * 100
+
+        # Calculate absolute ATR level signals
+        atr_signal_components = []
+
+        # Relative change signals (existing logic)
+        if atr_change > 10:
+            atr_signal_components.append("HIGH_VOLATILITY_INCREASING")
+        elif atr_change > 5:
+            atr_signal_components.append("VOLATILITY_INCREASING")
+        elif atr_change < -10:
+            atr_signal_components.append("VOLATILITY_DECREASING_SIGNIFICANTLY")
+        elif atr_change < -5:
+            atr_signal_components.append("VOLATILITY_DECREASING")
+        else:
+            atr_signal_components.append("STABLE_VOLATILITY")
+
+        # Absolute ATR level signals (new feature)
+        if len(self.atr_values) >= 20:  # Need sufficient history for meaningful comparison
+            # Calculate average ATR over longer period (20 periods)
+            atr_history = list(self.atr_values)[-20:]
+            avg_atr = sum(atr_history) / len(atr_history)
+
+            # Calculate standard deviation of ATR values
+            atr_variance = sum((x - avg_atr) ** 2 for x in atr_history) / len(atr_history)
+            atr_std = atr_variance ** 0.5
+
+            # Define volatility levels based on standard deviations from mean
+            if atr > avg_atr + (2 * atr_std):
+                atr_signal_components.append("EXTREMELY_HIGH_VOLATILITY")
+            elif atr > avg_atr + atr_std:
+                atr_signal_components.append("HIGH_VOLATILITY_LEVEL")
+            elif atr > avg_atr + (0.5 * atr_std):
+                atr_signal_components.append("ABOVE_AVERAGE_VOLATILITY")
+            elif atr < avg_atr - (2 * atr_std):
+                atr_signal_components.append("EXTREMELY_LOW_VOLATILITY")
+            elif atr < avg_atr - atr_std:
+                atr_signal_components.append("LOW_VOLATILITY_LEVEL")
+            elif atr < avg_atr - (0.5 * atr_std):
+                atr_signal_components.append("BELOW_AVERAGE_VOLATILITY")
+            else:
+                atr_signal_components.append("NORMAL_VOLATILITY_LEVEL")
+
+        # Combine signals with separator
+        return " | ".join(atr_signal_components)
+    
     def calculate_supertrend(self) -> Optional[Dict[str, Any]]:
         """Calculate SuperTrend indicator"""
         if len(self.highs) < self.config['supertrend_period'] or len(self.lows) < self.config['supertrend_period']:
             return None
         
-        # Calculate ATR
-        tr_values = []
-        for i in range(1, min(self.config['supertrend_period'] + 1, len(self.highs))):
-            high = self.highs[-i]
-            low = self.lows[-i]
-            prev_close = self.prices[-i-1] if len(self.prices) > i else self.prices[-i]
-            
-            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
-            tr_values.append(tr)
-        
-        atr = sum(tr_values) / len(tr_values)
-        
-        # Calculate SuperTrend
-        if self.supertrend_upper is None or self.supertrend_lower is None:
-            # Initialize
-            self.supertrend_upper = self.highs[-1] - (atr * self.config['supertrend_multiplier'])
-            self.supertrend_lower = self.lows[-1] + (atr * self.config['supertrend_multiplier'])
+        # Use the already calculated ATR if available, otherwise calculate it
+        if self.atr is not None:
+            atr = self.atr
         else:
-            # Update bands
-            basic_upper = (self.highs[-1] + self.lows[-1]) / 2 + (atr * self.config['supertrend_multiplier'])
-            basic_lower = (self.highs[-1] + self.lows[-1]) / 2 - (atr * self.config['supertrend_multiplier'])
+            # Calculate ATR for SuperTrend
+            tr_values = []
+            for i in range(1, min(self.config['supertrend_period'] + 1, len(self.highs))):
+                high = self.highs[-i]
+                low = self.lows[-i]
+                prev_close = self.prices[-i-1] if len(self.prices) > i else self.prices[-i]
+                
+                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+                tr_values.append(tr)
             
+            atr = sum(tr_values) / len(tr_values)
+        
+        # Calculate basic upper and lower bands
+        hl_avg = (self.highs[-1] + self.lows[-1]) / 2
+        basic_upper = hl_avg + (atr * self.config['supertrend_multiplier'])
+        basic_lower = hl_avg - (atr * self.config['supertrend_multiplier'])
+        
+        # Initialize or update bands
+        if self.supertrend_upper is None or self.supertrend_lower is None:
+            # First calculation - initialize bands
+            self.supertrend_upper = basic_upper
+            self.supertrend_lower = basic_lower
+            self.supertrend_direction = 1  # Start with uptrend assumption
+        else:
+            # Update upper band
             if basic_upper < self.supertrend_upper or self.prices[-2] > self.supertrend_upper:
                 self.supertrend_upper = basic_upper
-            else:
-                self.supertrend_upper = self.supertrend_upper
+            else: self.supertrend_upper
             
+            # Update lower band
             if basic_lower > self.supertrend_lower or self.prices[-2] < self.supertrend_lower:
                 self.supertrend_lower = basic_lower
-            else:
-                self.supertrend_lower = self.supertrend_lower
+            else: self.supertrend_lower
         
-        # Determine trend direction
+        # Determine trend direction based on current price
         current_price = self.prices[-1]
-        prev_price = self.prices[-2] if len(self.prices) > 1 else current_price
         
-        if prev_price <= self.supertrend_upper and current_price > self.supertrend_upper:
-            self.supertrend_direction = 1  # Uptrend
-        elif prev_price >= self.supertrend_lower and current_price < self.supertrend_lower:
-            self.supertrend_direction = -1  # Downtrend
+        if len(self.prices) > 1:
+            prev_price = self.prices[-2]
+            
+            # Check for trend change
+            if self.supertrend_direction == -1 and current_price > self.supertrend_upper:
+                self.supertrend_direction = 1  # Switch to uptrend
+            elif self.supertrend_direction == 1 and current_price < self.supertrend_lower:
+                self.supertrend_direction = -1  # Switch to downtrend
         
-        # Calculate SuperTrend value
+        # Calculate SuperTrend value based on current trend
         supertrend_value = self.supertrend_lower if self.supertrend_direction == 1 else self.supertrend_upper
         
         self.supertrend_values.append(supertrend_value)
@@ -914,95 +1010,6 @@ class TechnicalIndicators:
         else:
             return "NEUTRAL"
         
-    def calculate_atr(self) -> Optional[float]:
-        """Calculate Average True Range (ATR) indicator"""
-        if len(self.highs) < 2 or len(self.lows) < 2 or len(self.prices) < 2:
-            return None
-
-        # Calculate True Range for current period
-        high = self.highs[-1]
-        low = self.lows[-1]
-        prev_close = self.prices[-2]
-
-        tr = max(
-            high - low,
-            abs(high - prev_close),
-            abs(low - prev_close)
-        )
-
-        # Store TR value
-        self.atr_tr_values.append(tr)
-
-        # Need at least the ATR period number of TR values
-        if len(self.atr_tr_values) < self.config['atr_period']:
-            return None
-
-        # Calculate ATR as Simple Moving Average of True Range values
-        if self.atr is None:
-            # First ATR calculation - use simple average
-            self.atr = sum(self.atr_tr_values) / len(self.atr_tr_values)
-        else:
-            # Subsequent ATR calculations using Wilder's method (exponential smoothing)
-            # ATR = (Previous ATR * (n-1) + Current TR) / n
-            self.atr = ((self.atr * (self.config['atr_period'] - 1)) + tr) / self.config['atr_period']
-
-        self.atr_values.append(self.atr)
-        return self.atr
-        
-    # Updation to handle the advanced ATR Signal
-    def get_atr_signal(self, atr: float) -> str:
-        """Get trading signal based on ATR value"""
-        if len(self.atr_values) < 2:
-            return "NEUTRAL"
-
-        # Compare current ATR with previous ATR to determine volatility trend
-        prev_atr = list(self.atr_values)[-2]
-        atr_change = ((atr - prev_atr) / prev_atr) * 100
-
-        # Calculate absolute ATR level signals
-        atr_signal_components = []
-
-        # Relative change signals (existing logic)
-        if atr_change > 10:
-            atr_signal_components.append("HIGH_VOLATILITY_INCREASING")
-        elif atr_change > 5:
-            atr_signal_components.append("VOLATILITY_INCREASING")
-        elif atr_change < -10:
-            atr_signal_components.append("VOLATILITY_DECREASING_SIGNIFICANTLY")
-        elif atr_change < -5:
-            atr_signal_components.append("VOLATILITY_DECREASING")
-        else:
-            atr_signal_components.append("STABLE_VOLATILITY")
-
-        # Absolute ATR level signals (new feature)
-        if len(self.atr_values) >= 20:  # Need sufficient history for meaningful comparison
-            # Calculate average ATR over longer period (20 periods)
-            atr_history = list(self.atr_values)[-20:]
-            avg_atr = sum(atr_history) / len(atr_history)
-
-            # Calculate standard deviation of ATR values
-            atr_variance = sum((x - avg_atr) ** 2 for x in atr_history) / len(atr_history)
-            atr_std = atr_variance ** 0.5
-
-            # Define volatility levels based on standard deviations from mean
-            if atr > avg_atr + (2 * atr_std):
-                atr_signal_components.append("EXTREMELY_HIGH_VOLATILITY")
-            elif atr > avg_atr + atr_std:
-                atr_signal_components.append("HIGH_VOLATILITY_LEVEL")
-            elif atr > avg_atr + (0.5 * atr_std):
-                atr_signal_components.append("ABOVE_AVERAGE_VOLATILITY")
-            elif atr < avg_atr - (2 * atr_std):
-                atr_signal_components.append("EXTREMELY_LOW_VOLATILITY")
-            elif atr < avg_atr - atr_std:
-                atr_signal_components.append("LOW_VOLATILITY_LEVEL")
-            elif atr < avg_atr - (0.5 * atr_std):
-                atr_signal_components.append("BELOW_AVERAGE_VOLATILITY")
-            else:
-                atr_signal_components.append("NORMAL_VOLATILITY_LEVEL")
-
-        # Combine signals with separator
-        return " | ".join(atr_signal_components)
-    
     # Fibonacci Retracement
 
     def calculate_fibonacci_retracement(self) -> Optional[Dict[str, Any]]:

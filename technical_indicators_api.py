@@ -46,7 +46,7 @@ class AIDataBatcher:
     
     def __init__(self):
         self.openai_client = OpenAI(
-            
+
         )
         self.batch_duration = 600  # 10 minutes in seconds
         self.max_data_points = 1200  # Expected data points per 10-minute batch (500ms intervals)
