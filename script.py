@@ -236,3 +236,185 @@ def get_cci_signal(self, cci: float) -> str:
         return "BEARISH"
     else:
         return "NEUTRAL"
+    
+def calculate_stochastic_oscillator(self) -> Optional[Dict[str, float]]:
+    """Calculate Stochastic Oscillator (%K and %D)"""
+    k_period = self.config['stochastic_k_period']
+    d_period = self.config['stochastic_d_period']
+    
+    # Validate we have enough data
+    if (len(self.highs) < k_period or 
+        len(self.lows) < k_period or 
+        len(self.prices) < k_period):
+        return None
+    
+    # Validate all arrays have the same length
+    if not (len(self.highs) == len(self.lows) == len(self.prices)):
+        return None
+    
+    # Initialize sliding window structures if not already done
+    if not hasattr(self, '_stoch_min_deque'):
+        # Sliding min/max structures - store (value, index) tuples
+        self._stoch_min_deque = deque()
+        self._stoch_max_deque = deque()
+        
+        # Rolling sum structures for %D
+        self._stoch_k_rolling = deque(maxlen=d_period)
+        self._stoch_k_sum = 0.0
+        
+        # Previous values for crossover detection
+        self._prev_k = None
+        self._prev_d = None
+        
+        # Fixed-size deques to prevent unbounded growth
+        self.stochastic_k_values = deque(maxlen=d_period)
+        self.stochastic_values = deque(maxlen=100)
+        
+        # Initialize with the first k_period data points
+        # Process the first window
+        for i in range(k_period):
+            idx = i
+            high_val = self.highs[i]
+            low_val = self.lows[i]
+            
+            # Maintain min deque (monotonic increasing)
+            while self._stoch_min_deque and self._stoch_min_deque[-1][0] >= low_val:
+                self._stoch_min_deque.pop()
+            self._stoch_min_deque.append((low_val, idx))
+            
+            # Maintain max deque (monotonic decreasing)
+            while self._stoch_max_deque and self._stoch_max_deque[-1][0] <= high_val:
+                self._stoch_max_deque.pop()
+            self._stoch_max_deque.append((high_val, idx))
+        
+        # Now process any remaining historical points
+        for i in range(k_period, len(self.highs)):
+            idx = i
+            high_val = self.highs[i]
+            low_val = self.lows[i]
+            
+            # Maintain min deque (monotonic increasing)
+            while self._stoch_min_deque and self._stoch_min_deque[-1][0] >= low_val:
+                self._stoch_min_deque.pop()
+            self._stoch_min_deque.append((low_val, idx))
+            
+            # Maintain max deque (monotonic decreasing)
+            while self._stoch_max_deque and self._stoch_max_deque[-1][0] <= high_val:
+                self._stoch_max_deque.pop()
+            self._stoch_max_deque.append((high_val, idx))
+            
+            # Remove elements outside the current window
+            window_start = idx - k_period + 1
+            while self._stoch_min_deque and self._stoch_min_deque[0][1] < window_start:
+                self._stoch_min_deque.popleft()
+            while self._stoch_max_deque and self._stoch_max_deque[0][1] < window_start:
+                self._stoch_max_deque.popleft()
+            
+            # Calculate %K for this historical point
+            current_price = self.prices[i]
+            highest_high = self._stoch_max_deque[0][0]
+            lowest_low = self._stoch_min_deque[0][0]
+            
+            if highest_high != lowest_low:
+                k_val = ((current_price - lowest_low) / (highest_high - lowest_low)) * 100
+                k_val = max(0.0, min(100.0, k_val))
+                
+                self.stochastic_k_values.append(k_val)
+                
+                # Update rolling sum for %D
+                if len(self._stoch_k_rolling) == d_period:
+                    self._stoch_k_sum -= self._stoch_k_rolling[0]
+                self._stoch_k_rolling.append(k_val)
+                self._stoch_k_sum += k_val
+                
+                # Calculate %D if we have enough %K values
+                if len(self._stoch_k_rolling) == d_period:
+                    d_val = self._stoch_k_sum / d_period
+                    self._prev_k = k_val
+                    self._prev_d = d_val
+        
+        # Mark as initialized - we've processed all historical data
+        self._stoch_initialized = True
+    else:
+        # Add only the latest data point
+        idx = len(self.highs) - 1
+        high_val = self.highs[-1]
+        low_val = self.lows[-1]
+        
+        # Maintain min deque (monotonic increasing)
+        while self._stoch_min_deque and self._stoch_min_deque[-1][0] >= low_val:
+            self._stoch_min_deque.pop()
+        self._stoch_min_deque.append((low_val, idx))
+        
+        # Maintain max deque (monotonic decreasing)
+        while self._stoch_max_deque and self._stoch_max_deque[-1][0] <= high_val:
+            self._stoch_max_deque.pop()
+        self._stoch_max_deque.append((high_val, idx))
+        
+        # Remove elements outside the current window
+        window_start = idx - k_period + 1
+        while self._stoch_min_deque and self._stoch_min_deque[0][1] < window_start:
+            self._stoch_min_deque.popleft()
+        while self._stoch_max_deque and self._stoch_max_deque[0][1] < window_start:
+            self._stoch_max_deque.popleft()
+    
+    # Get current closing price and period high/low from deques
+    current_price = self.prices[-1]
+    highest_high = self._stoch_max_deque[0][0]
+    lowest_low = self._stoch_min_deque[0][0]
+    
+    # Calculate %K
+    if highest_high == lowest_low:
+        # Flat price - return previous values or None
+        return None
+    
+    stochastic_k = ((current_price - lowest_low) / (highest_high - lowest_low)) * 100
+    
+    # Clamp %K to valid range [0, 100]
+    stochastic_k = max(0.0, min(100.0, stochastic_k))
+    
+    self.stochastic_k = stochastic_k
+    self.stochastic_k_values.append(stochastic_k)
+    
+    # Calculate %D using rolling sum
+    if len(self._stoch_k_rolling) == d_period:
+        self._stoch_k_sum -= self._stoch_k_rolling[0]
+        
+    self._stoch_k_rolling.append(stochastic_k)
+    self._stoch_k_sum += stochastic_k
+    
+    if len(self._stoch_k_rolling) == d_period:
+        stochastic_d = self._stoch_k_sum / d_period
+        self.stochastic_d = stochastic_d
+        
+        # Get signal with crossover detection
+        signal = self.get_stochastic_signal(
+            stochastic_k, 
+            stochastic_d, 
+            self._prev_k, 
+            self._prev_d
+        )
+        
+        # Store the complete stochastic data
+        stochastic_data = {
+            'k': stochastic_k,
+            'd': stochastic_d,
+            'signal': signal
+        }
+        
+        self.stochastic_values.append(stochastic_data)
+        
+        # Update previous values for next crossover detection
+        self._prev_k = stochastic_k
+        self._prev_d = stochastic_d
+        
+        return stochastic_data
+    
+    # Return only %K if we don't have enough data for %D yet
+    signal = self.get_stochastic_signal(stochastic_k, None, None, None)
+    
+    return {
+        'k': stochastic_k,
+        'd': None,
+        'signal': signal
+    }

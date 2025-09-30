@@ -830,9 +830,6 @@ class TechnicalIndicators:
         """Calculate Stochastic Oscillator (%K and %D)"""
         if len(self.highs) < self.config['stochastic_k_period'] or len(self.lows) < self.config['stochastic_k_period']:
             return None
-        # Validate data synchronization
-        # if not (len(self.highs) == len(self.lows) == len(self.prices)):
-        #     raise ValueError("Data arrays (highs, lows, prices) must be synchronized")
         
         k_period = self.config['stochastic_k_period']
         d_period = self.config['stochastic_d_period']
@@ -842,10 +839,10 @@ class TechnicalIndicators:
         
         # Initialize sliding window structures if not already done
         if not hasattr(self, '_stoch_min_deque'):
-            # Sliding min/max structures
+            # Sliding min/max structures - store (value, index) tuples
             self._stoch_min_deque = deque()
             self._stoch_max_deque = deque()
-            self._stoch_window = deque(maxlen=k_period)
+            self._stoch_current_idx = -1
             
             # Rolling sum structures for %D
             self._stoch_k_rolling = deque(maxlen=d_period)
@@ -860,66 +857,61 @@ class TechnicalIndicators:
             self.stochastic_values = deque(maxlen=100)
             
             # Populate sliding window with historical data
+            # Start from the point where we have enough data for a full window
             start_idx = max(0, len(self.highs) - k_period)
+            
             for i in range(start_idx, len(self.highs)):
+                self._stoch_current_idx += 1
                 high_val = self.highs[i]
                 low_val = self.lows[i]
                 
-                # Remove old values from window
-                if len(self._stoch_window) == k_period:
-                    old_high, old_low = self._stoch_window[0]
-                    if self._stoch_min_deque and self._stoch_min_deque[0] == old_low:
-                        self._stoch_min_deque.popleft()
-                    if self._stoch_max_deque and self._stoch_max_deque[0] == old_high:
-                        self._stoch_max_deque.popleft()
-                
-                self._stoch_window.append((high_val, low_val))
-                
-                # Maintain min deque
-                while self._stoch_min_deque and self._stoch_min_deque[-1] > low_val:
+                # Maintain min deque (monotonic increasing)
+                while self._stoch_min_deque and self._stoch_min_deque[-1][0] >= low_val:
                     self._stoch_min_deque.pop()
-
-                self._stoch_min_deque.append(low_val)
+                self._stoch_min_deque.append((low_val, self._stoch_current_idx))
                 
-                # Maintain max deque
-                while self._stoch_max_deque and self._stoch_max_deque[-1] < high_val:
+                # Maintain max deque (monotonic decreasing)
+                while self._stoch_max_deque and self._stoch_max_deque[-1][0] <= high_val:
                     self._stoch_max_deque.pop()
-
-                self._stoch_max_deque.append(high_val)
+                self._stoch_max_deque.append((high_val, self._stoch_current_idx))
+                
+                # Remove elements outside the current window
+                window_start = self._stoch_current_idx - k_period + 1
+                while self._stoch_min_deque and self._stoch_min_deque[0][1] < window_start:
+                    self._stoch_min_deque.popleft()
+                while self._stoch_max_deque and self._stoch_max_deque[0][1] < window_start:
+                    self._stoch_max_deque.popleft()
         else:
             # Add only the latest data point
+            self._stoch_current_idx += 1
             high_val = self.highs[-1]
             low_val = self.lows[-1]
             
-            # Remove old values from window
-            if len(self._stoch_window) == k_period:
-                old_high, old_low = self._stoch_window[0]
-                if self._stoch_min_deque and self._stoch_min_deque[0] == old_low:
-                    self._stoch_min_deque.popleft()
-                if self._stoch_max_deque and self._stoch_max_deque[0] == old_high:
-                    self._stoch_max_deque.popleft()
-            
-            self._stoch_window.append((high_val, low_val))
-            
-            # Maintain min deque
-            while self._stoch_min_deque and self._stoch_min_deque[-1] > low_val:
+            # Maintain min deque (monotonic increasing)
+            while self._stoch_min_deque and self._stoch_min_deque[-1][0] >= low_val:
                 self._stoch_min_deque.pop()
-
-            self._stoch_min_deque.append(low_val)
+            self._stoch_min_deque.append((low_val, self._stoch_current_idx))
             
-            # Maintain max deque
-            while self._stoch_max_deque and self._stoch_max_deque[-1] < high_val:
+            # Maintain max deque (monotonic decreasing)
+            while self._stoch_max_deque and self._stoch_max_deque[-1][0] <= high_val:
                 self._stoch_max_deque.pop()
-
-            self._stoch_max_deque.append(high_val)
+            self._stoch_max_deque.append((high_val, self._stoch_current_idx))
+            
+            # Remove elements outside the current window
+            window_start = self._stoch_current_idx - k_period + 1
+            while self._stoch_min_deque and self._stoch_min_deque[0][1] < window_start:
+                self._stoch_min_deque.popleft()
+            while self._stoch_max_deque and self._stoch_max_deque[0][1] < window_start:
+                self._stoch_max_deque.popleft()
         
-        if len(self._stoch_window) < k_period:
+        # Ensure we have a full window before calculating
+        if self._stoch_current_idx < k_period - 1:
             return None
         
-        # Get current closing price and period high/low
+        # Get current closing price and period high/low from deques
         current_price = self.prices[-1]
-        highest_high = self._stoch_max_deque[0]
-        lowest_low = self._stoch_min_deque[0]
+        highest_high = self._stoch_max_deque[0][0]
+        lowest_low = self._stoch_min_deque[0][0]
         
         # Calculate %K
         if highest_high == lowest_low:
