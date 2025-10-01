@@ -489,18 +489,6 @@ def calculate_cci(self) -> Optional[float]:
 def get_cci_signal(self, cci: float) -> str:
     """
     Get trading signal based on CCI value.
-    
-    Standard CCI interpretation:
-    - Above +100: Overbought
-    - Below -100: Oversold
-    - Between 0 and +100: Bullish
-    - Between 0 and -100: Bearish
-    
-    Args:
-        cci: Current CCI value
-        
-    Returns:
-        str: Signal classification
     """
     if cci > 100:
         return "OVERBOUGHT"
@@ -512,3 +500,345 @@ def get_cci_signal(self, cci: float) -> str:
         return "BEARISH"
     else:
         return "NEUTRAL"
+
+class FibonacciCalculator:
+    def __init__(self, config):
+        self.config = config
+        self.highs = deque(maxlen=config.get('fibonacci_period', 100))
+        self.lows = deque(maxlen=config.get('fibonacci_period', 100))
+        self.prices = deque(maxlen=config.get('fibonacci_period', 100))
+        self.fibonacci_values = deque(maxlen=100)
+        
+        # Cache variables
+        self.fibonacci_swing_high = None
+        self.fibonacci_swing_low = None
+        self.fibonacci_levels_cache = None
+        self.fibonacci_trend_direction = None
+        self._cached_swing_points = None
+        
+        # Pre-convert fibonacci levels to numeric for faster access
+        self.fib_levels_numeric = np.array(config.get('fibonacci_levels', [0.236, 0.382, 0.5, 0.618, 0.786]))
+
+    def calculate_fibonacci_retracement(self) -> Optional[Dict[str, Any]]:
+        """Calculate Fibonacci Retracement levels"""
+        period = self.config['fibonacci_period']
+        
+        # Input validation
+        if len(self.highs) < period or len(self.lows) < period or len(self.prices) < period:
+            return None
+        
+        if period <= 0:
+            return None
+
+        # Convert to numpy arrays for faster calculations
+        recent_highs = np.array(self.highs)
+        recent_lows = np.array(self.lows)
+        recent_prices = np.array(self.prices)
+
+        # Validate data
+        if len(recent_highs) == 0 or len(recent_lows) == 0 or len(recent_prices) == 0:
+            return None
+        
+        if np.any(np.isnan(recent_highs)) or np.any(np.isnan(recent_lows)) or np.any(np.isnan(recent_prices)):
+            return None
+
+        # Find swing high and swing low using proper swing detection
+        swing_high_idx, swing_low_idx = self._detect_swing_points(recent_highs, recent_lows)
+        swing_high = recent_highs[swing_high_idx]
+        swing_low = recent_lows[swing_low_idx]
+
+        # Validate price range
+        price_range = swing_high - swing_low
+        if price_range <= 0:
+            return None
+
+        # Get current price and validate
+        current_price = float(self.prices[-1])
+        if current_price <= 0 or np.isnan(current_price):
+            return None
+
+        # Determine trend direction using proper momentum analysis
+        trend_direction = self._detect_trend_direction(recent_prices, swing_high_idx, swing_low_idx)
+
+        # Check if swing points changed before recalculating levels
+        swing_points_changed = (self._cached_swing_points != (swing_high, swing_low))
+        
+        if swing_points_changed or self.fibonacci_levels_cache is None:
+            # Calculate Fibonacci levels (always as retracements from swing points)
+            fibonacci_levels = {}
+            
+            if swing_high_idx > swing_low_idx:
+                # Uptrend: measure retracement from high down to low
+                for level in self.fib_levels_numeric:
+                    retracement_price = swing_high - (price_range * level)
+                    fibonacci_levels[level] = retracement_price
+            else:
+                # Downtrend: measure retracement from low up to high
+                for level in self.fib_levels_numeric:
+                    retracement_price = swing_low + (price_range * level)
+                    fibonacci_levels[level] = retracement_price
+            
+            # Cache the levels and swing points
+            self.fibonacci_levels_cache = fibonacci_levels
+            self._cached_swing_points = (swing_high, swing_low)
+        else:
+            # Use cached levels
+            fibonacci_levels = self.fibonacci_levels_cache
+
+        # Store current values
+        self.fibonacci_swing_high = swing_high
+        self.fibonacci_swing_low = swing_low
+        self.fibonacci_trend_direction = trend_direction
+
+        # Find closest level and generate signal in one pass
+        closest_level, signal = self._find_closest_and_signal(
+            current_price, fibonacci_levels, trend_direction, swing_high_idx > swing_low_idx
+        )
+
+        fibonacci_data = {
+            'swing_high': float(swing_high),
+            'swing_low': float(swing_low),
+            'price_range': float(price_range),
+            'trend_direction': trend_direction,
+            'levels': {f'fib_{k:.3f}': float(v) for k, v in fibonacci_levels.items()},
+            'closest_level': closest_level,
+            'signal': signal,
+            'current_price': current_price
+        }
+
+        self.fibonacci_values.append(fibonacci_data)
+        return fibonacci_data
+
+    def _detect_swing_points(self, highs: np.ndarray, lows: np.ndarray, window: int = 5) -> tuple:
+        """Detect swing high and swing low using local extrema"""
+        # Validate window size
+        window = min(window, len(highs) // 4)
+        window = max(1, window)
+        
+        swing_high_idx = 0
+        swing_low_idx = 0
+        max_score = -np.inf
+        min_score = np.inf
+        
+        # Find swing high: local maximum with lower highs around it
+        for i in range(window, len(highs) - window):
+            left_slice = highs[max(0, i-window):i]
+            right_slice = highs[i+1:min(len(highs), i+window+1)]
+            
+            if len(left_slice) > 0 and len(right_slice) > 0:
+                if highs[i] >= np.max(left_slice) and highs[i] >= np.max(right_slice):
+                    # Score based on prominence
+                    score = highs[i] + (highs[i] - np.mean(left_slice)) + (highs[i] - np.mean(right_slice))
+                    if score > max_score:
+                        max_score = score
+                        swing_high_idx = i
+        
+        # Find swing low: local minimum with higher lows around it
+        for i in range(window, len(lows) - window):
+            left_slice = lows[max(0, i-window):i]
+            right_slice = lows[i+1:min(len(lows), i+window+1)]
+            
+            if len(left_slice) > 0 and len(right_slice) > 0:
+                if lows[i] <= np.min(left_slice) and lows[i] <= np.min(right_slice):
+                    # Score based on prominence
+                    score = -lows[i] - (np.mean(left_slice) - lows[i]) - (np.mean(right_slice) - lows[i])
+                    if score < min_score:
+                        min_score = score
+                        swing_low_idx = i
+        
+        # Fallback to simple max/min if no swing points detected
+        if max_score == -np.inf:
+            swing_high_idx = np.argmax(highs)
+        if min_score == np.inf:
+            swing_low_idx = np.argmin(lows)
+        
+        return swing_high_idx, swing_low_idx
+
+    def _detect_trend_direction(self, prices: np.ndarray, swing_high_idx: int, swing_low_idx: int) -> str:
+        """Detect trend direction based on swing point positioning and price momentum"""
+        # Primary: Check which swing came more recently
+        if swing_high_idx > swing_low_idx:
+            primary_trend = 'up'
+        else:
+            primary_trend = 'down'
+        
+        # Secondary: Confirm with recent price momentum
+        if len(prices) >= 10:
+            recent_momentum = prices[-1] - prices[-10]
+            momentum_trend = 'up' if recent_momentum > 0 else 'down'
+            
+            # Confirm trend if both agree
+            if primary_trend == momentum_trend:
+                return primary_trend
+        
+        return primary_trend
+
+    def _find_closest_and_signal(self, current_price: float, fibonacci_levels: Dict[float, float], 
+                                  trend_direction: str, is_uptrend_swing: bool) -> tuple:
+        """Find closest Fibonacci level and generate signal in single pass"""
+        if not fibonacci_levels:
+            return None, "NEUTRAL"
+
+        # Find closest level using numpy for speed
+        levels_array = np.array(list(fibonacci_levels.keys()))
+        prices_array = np.array(list(fibonacci_levels.values()))
+        
+        distances = np.abs(prices_array - current_price)
+        closest_idx = np.argmin(distances)
+        
+        closest_distance = distances[closest_idx]
+        closest_level_key = levels_array[closest_idx]
+        closest_level_price = prices_array[closest_idx]
+        
+        distance_percentage = (closest_distance / current_price) * 100 if current_price > 0 else float('inf')
+        
+        closest_level = {
+            'level_name': f'fib_{closest_level_key:.3f}',
+            'level_price': float(closest_level_price),
+            'distance': float(closest_distance),
+            'distance_percentage': float(distance_percentage)
+        }
+
+        # Generate signal based on numeric level comparison
+        signal = self._generate_signal(
+            current_price, closest_level_key, closest_level_price, 
+            distance_percentage, fibonacci_levels, is_uptrend_swing
+        )
+
+        return closest_level, signal
+
+    def _generate_signal(self, current_price: float, closest_level: float, closest_price: float,
+                        distance_percentage: float, fibonacci_levels: Dict[float, float], 
+                        is_uptrend_swing: bool) -> str:
+        """Generate trading signal based on Fibonacci levels using numeric comparisons"""
+        proximity_threshold = 0.5  # 0.5% distance threshold
+        medium_threshold = 2.0
+
+        # Strong signal when price is very close to key Fibonacci levels
+        if distance_percentage < proximity_threshold:
+            # 61.8% (Golden Ratio) and 38.2% are most significant
+            if np.isclose(closest_level, 0.618, atol=0.001) or np.isclose(closest_level, 0.382, atol=0.001):
+                if is_uptrend_swing:
+                    return "STRONG_SUPPORT_BOUNCE" if current_price >= closest_price else "STRONG_RESISTANCE_REJECTION"
+                else:
+                    return "STRONG_RESISTANCE_REJECTION" if current_price >= closest_price else "STRONG_SUPPORT_BOUNCE"
+
+            # 50% level (psychological level)
+            elif np.isclose(closest_level, 0.500, atol=0.001):
+                if is_uptrend_swing:
+                    return "SUPPORT_BOUNCE" if current_price >= closest_price else "RESISTANCE_REJECTION"
+                else:
+                    return "RESISTANCE_REJECTION" if current_price >= closest_price else "SUPPORT_BOUNCE"
+
+            # Other levels
+            else:
+                if is_uptrend_swing:
+                    return "WEAK_SUPPORT" if current_price >= closest_price else "WEAK_RESISTANCE"
+                else:
+                    return "WEAK_RESISTANCE" if current_price >= closest_price else "WEAK_SUPPORT"
+
+        # Medium distance signals
+        elif distance_percentage < medium_threshold:
+            if np.isclose(closest_level, 0.618, atol=0.001) or np.isclose(closest_level, 0.382, atol=0.001):
+                if is_uptrend_swing:
+                    return "APPROACHING_SUPPORT" if current_price > closest_price else "APPROACHING_RESISTANCE"
+                else:
+                    return "APPROACHING_RESISTANCE" if current_price > closest_price else "APPROACHING_SUPPORT"
+
+        # Trend continuation signals based on position relative to key levels
+        fib_618 = fibonacci_levels.get(0.618)
+        fib_382 = fibonacci_levels.get(0.382)
+
+        if fib_618 is not None and fib_382 is not None:
+            if is_uptrend_swing:
+                if current_price > fib_382:
+                    return "TREND_CONTINUATION_BULLISH"
+                elif current_price < fib_618:
+                    return "RETRACEMENT_DEEP"
+            else:
+                if current_price < fib_382:
+                    return "TREND_CONTINUATION_BEARISH"
+                elif current_price > fib_618:
+                    return "RETRACEMENT_DEEP"
+
+        return "NEUTRAL"
+
+    def find_closest_fibonacci_level(self, current_price: float, fibonacci_levels: Dict[str, float]) -> Dict[str, Any]:
+        """Find the closest Fibonacci level to current price"""
+        if not fibonacci_levels or current_price <= 0:
+            return None
+
+        # Convert string keys back to numeric for calculation
+        numeric_levels = {}
+        for k, v in fibonacci_levels.items():
+            try:
+                # Extract numeric value from 'fib_X.XXX' format
+                numeric_key = float(k.replace('fib_', ''))
+                numeric_levels[numeric_key] = v
+            except (ValueError, AttributeError):
+                continue
+        
+        if not numeric_levels:
+            return None
+
+        levels_array = np.array(list(numeric_levels.values()))
+        distances = np.abs(levels_array - current_price)
+        closest_idx = np.argmin(distances)
+        
+        closest_distance = distances[closest_idx]
+        closest_level_price = levels_array[closest_idx]
+        
+        # Find the key for this price
+        closest_level_name = None
+        for k, v in fibonacci_levels.items():
+            if np.isclose(v, closest_level_price, atol=1e-6):
+                closest_level_name = k
+                break
+
+        return {
+            'level_name': closest_level_name,
+            'level_price': float(closest_level_price),
+            'distance': float(closest_distance),
+            'distance_percentage': (closest_distance / current_price) * 100
+        }
+
+    def get_fibonacci_signal(self, current_price: float, fibonacci_levels: Dict[str, float], trend_direction: str) -> str:
+        """Get trading signal based on Fibonacci levels"""
+        if not fibonacci_levels or current_price <= 0:
+            return "NEUTRAL"
+
+        # Convert string keys to numeric
+        numeric_levels = {}
+        for k, v in fibonacci_levels.items():
+            try:
+                numeric_key = float(k.replace('fib_', ''))
+                numeric_levels[numeric_key] = v
+            except (ValueError, AttributeError):
+                continue
+
+        if not numeric_levels:
+            return "NEUTRAL"
+
+        # Get the closest level info (reuse existing method)
+        closest_level = self.find_closest_fibonacci_level(current_price, fibonacci_levels)
+
+        if not closest_level:
+            return "NEUTRAL"
+
+        distance_percentage = closest_level['distance_percentage']
+        level_name = closest_level['level_name']
+        level_price = closest_level['level_price']
+
+        # Extract numeric level
+        try:
+            numeric_level = float(level_name.replace('fib_', ''))
+        except (ValueError, AttributeError):
+            return "NEUTRAL"
+
+        # Determine if uptrend swing based on trend direction and price position
+        is_uptrend_swing = trend_direction == 'up'
+
+        return self._generate_signal(
+            current_price, numeric_level, level_price,
+            distance_percentage, numeric_levels, is_uptrend_swing
+        )

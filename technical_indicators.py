@@ -1061,18 +1061,6 @@ class TechnicalIndicators:
     def get_cci_signal(self, cci: float) -> str:
         """
         Get trading signal based on CCI value.
-        
-        Standard CCI interpretation:
-        - Above +100: Overbought
-        - Below -100: Oversold
-        - Between 0 and +100: Bullish
-        - Between 0 and -100: Bearish
-        
-        Args:
-            cci: Current CCI value
-            
-        Returns:
-            str: Signal classification
         """
         if cci > 100:
             return "OVERBOUGHT"
