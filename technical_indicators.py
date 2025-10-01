@@ -992,63 +992,95 @@ class TechnicalIndicators:
         return "NEUTRAL"
     
     def calculate_cci(self) -> Optional[float]:
-        """Calculate Commodity Channel Index (CCI)"""
-        # Validate input data alignment
-        if not (len(self.highs) >= 1 and len(self.lows) >= 1 and len(self.prices) >= 1):
+        """
+        Calculate Commodity Channel Index (CCI).
+        
+        CCI = (Typical Price - SMA of TP) / (0.015 * Mean Deviation)
+        where Typical Price = (High + Low + Close) / 3
+        """
+        # Validate config
+        try:
+            period = self.config['cci_period']
+        except KeyError:
+            raise KeyError("Config must contain 'cci_period' key")
+        
+        # Validate input data existence and alignment
+        if not (len(self.highs) >= period and len(self.lows) >= period and len(self.prices) >= period):
             return None
         
         if len(self.highs) != len(self.lows) or len(self.highs) != len(self.prices):
-            raise ValueError("Input arrays must have equal length")
+            raise ValueError(
+                f"Input arrays must have equal length. "
+                f"Got highs={len(self.highs)}, lows={len(self.lows)}, prices={len(self.prices)}"
+            )
+        
+        # Validate numeric values
+        if not all(isinstance(x, (int, float)) and not (x != x or abs(x) == float('inf')) 
+                for x in [self.highs[-1], self.lows[-1], self.prices[-1]]):
+            raise ValueError("Input arrays contain invalid values (NaN or Inf)")
+        
+        # Initialize deques on first call (should ideally be in __init__)
+        if not hasattr(self, '_tp_deque'):
+            self._tp_deque = deque(maxlen=period)
+        if not hasattr(self, '_cci_deque'):
+            self._cci_deque = deque(maxlen=1000)  # Memory-limited history
         
         # Calculate Typical Price (TP)
         typical_price = (self.highs[-1] + self.lows[-1] + self.prices[-1]) / 3
-        
-        # Use deque with maxlen for automatic memory management
-        if not hasattr(self, '_tp_deque'):
-            self._tp_deque = deque(maxlen=self.config['cci_period'])
-        
         self._tp_deque.append(typical_price)
-        self.typical_prices.append(typical_price)  # Keep if needed elsewhere
         
         # Need at least the period number of typical prices
-        if len(self._tp_deque) < self.config['cci_period']:
+        if len(self._tp_deque) < period:
             return None
         
         # Calculate SMA and Mean Deviation in a single pass
-        period = self.config['cci_period']
-        sma_tp = sum(self._tp_deque) / period
+        sma_tp = 0.0
+        mean_deviation = 0.0
         
-        # Calculate Mean Deviation
-        mean_deviation = sum(abs(tp - sma_tp) for tp in self._tp_deque) / period
+        for tp in self._tp_deque:
+            sma_tp += tp
+        sma_tp /= period
         
-        # Calculate CCI with epsilon check for floating point comparison
-        EPSILON = 1e-10
-        if mean_deviation < EPSILON:
+        for tp in self._tp_deque:
+            mean_deviation += abs(tp - sma_tp)
+        mean_deviation /= period
+        
+        # Calculate CCI with Lambert's constant (0.015)
+        # Using 1e-9 as epsilon for practical floating-point comparison
+        if mean_deviation < 1e-9:
             cci = 0.0
         else:
             cci = (typical_price - sma_tp) / (0.015 * mean_deviation)
         
-        # Manage memory for cci_values
-        if not hasattr(self, '_max_cci_history'):
-            self._max_cci_history = 1000  # Configurable limit
-        
-        self.cci_values.append(cci)
-        if len(self.cci_values) > self._max_cci_history:
-            self.cci_values.pop(0)  # Or use deque with maxlen
+        # Store CCI with memory management
+        self._cci_deque.append(cci)
         
         return cci
 
+
     def get_cci_signal(self, cci: float) -> str:
-        """Get trading signal based on CCI value - Improved version"""
-        EPSILON = 1e-10
+        """
+        Get trading signal based on CCI value.
         
+        Standard CCI interpretation:
+        - Above +100: Overbought
+        - Below -100: Oversold
+        - Between 0 and +100: Bullish
+        - Between 0 and -100: Bearish
+        
+        Args:
+            cci: Current CCI value
+            
+        Returns:
+            str: Signal classification
+        """
         if cci > 100:
             return "OVERBOUGHT"
         elif cci < -100:
             return "OVERSOLD"
-        elif cci > EPSILON:
+        elif cci > 1e-9:
             return "BULLISH"
-        elif cci < -EPSILON:
+        elif cci < -1e-9:
             return "BEARISH"
         else:
             return "NEUTRAL"
